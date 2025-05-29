@@ -1,0 +1,39 @@
+{
+    "model_type": "conv2",
+    "mean_accuracy": 0.5014375,
+    "std_accuracy": 0.006635310373298309,
+    "stderr_accuracy": 0.002098269376176475,
+    "num_seeds": 10,
+    "seed_results": {
+        "2": {
+            "test_accuracy": 0.4903125
+        },
+        "1": {
+            "test_accuracy": 0.505
+        },
+        "7": {
+            "test_accuracy": 0.5115625
+        },
+        "6": {
+            "test_accuracy": 0.510625
+        },
+        "5": {
+            "test_accuracy": 0.498125
+        },
+        "0": {
+            "test_accuracy": 0.5065625
+        },
+        "8": {
+            "test_accuracy": 0.493125
+        },
+        "3": {
+            "test_accuracy": 0.49875
+        },
+        "9": {
+            "test_accuracy": 0.5003125
+        },
+        "4": {
+            "test_accuracy": 0.5
+        }
+    }
+}
