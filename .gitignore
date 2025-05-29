@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Project specific
+*.h5
+data/**/*.h5
+learn2learn/
+naturalistic/objects/
+naturalistic/objectsall2/
+logs/
+results/
+slurm_logs/
+*.out
+*.err
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# Large data directories
+data/naturalistic/raw_images/
+data/naturalistic/processed/
+data/naturalistic/cache/
+
+# Archive and backup directories
+_archive/
+_deprecated/
+backup/
