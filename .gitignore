@@ -42,8 +42,8 @@ env/
 *.h5
 data/**/*.h5
 learn2learn/
-naturalistic/objects/
-naturalistic/objectsall2/
+naturalistic/objectsall/
+naturalistic/objectsall_2/
 logs/
 results/
 slurm_logs/
