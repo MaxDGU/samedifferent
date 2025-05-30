@@ -13,11 +13,10 @@ import sys
 import learn2learn as l2l
 import torch.nn as nn
 
-from conv2lr import SameDifferentCNN as Conv2CNN
-from conv4lr import SameDifferentCNN as Conv4CNN
-from conv6lr import SameDifferentCNN as Conv6CNN
-from conv6lr import SameDifferentDataset, collate_episodes
-from utils_meta import train_epoch, validate
+from .models.conv2lr import SameDifferentCNN as Conv2CNN
+from .models.conv4lr import SameDifferentCNN as Conv4CNN
+from .models.conv6lr import SameDifferentCNN as Conv6CNN
+from .models.utils_meta import SameDifferentDataset, collate_episodes, train_epoch, validate
 
 PB_TASKS = [
     'regular', 'lines', 'open', 'wider_line', 'scrambled',

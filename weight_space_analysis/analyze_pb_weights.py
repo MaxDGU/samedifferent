@@ -9,16 +9,17 @@ import sys
 import collections # For defaultdict
 
 # --- Add project root to sys.path ---
-# Assumes this script is in remote/baselines
-script_dir = Path(__file__).parent.resolve()
-project_root = script_dir.parent.parent 
-sys.path.append(str(project_root))
-print(f"Added project root to sys.path: {project_root}")
+# Comment in script_dir and project_root was misleading.
+# Assuming 'weight_space_analysis' is a top-level directory in the project.
+# script_dir = Path(__file__).parent.resolve()
+# project_root = script_dir.parent # This would be the project root
+# sys.path.append(str(project_root)) # Prefer PYTHONPATH setup
+# print(f"Added project root to sys.path: {project_root}")
 
 # Import model definitions
-from conv2 import SameDifferentCNN as Conv2CNN
-from conv4 import SameDifferentCNN as Conv4CNN
-from conv6 import SameDifferentCNN as Conv6CNN
+from baselines.models.conv2 import SameDifferentCNN as Conv2CNN
+from baselines.models.conv4 import SameDifferentCNN as Conv4CNN
+from baselines.models.conv6 import SameDifferentCNN as Conv6CNN
 
 # --- Constants (should match the run script) ---
 ARCHITECTURES = {

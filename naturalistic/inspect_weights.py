@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 # Add parent directory to path to import models
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # Commenting out
 from baselines.models.conv2 import SameDifferentCNN as Conv2CNN
 from baselines.models.conv4 import SameDifferentCNN as Conv4CNN
 

@@ -3,9 +3,11 @@ import subprocess
 import json
 import numpy as np
 from itertools import product
+import argparse
+import time
 
 # Define tasks and architectures
-from models.utils import PB_TASKS, ARCHITECTURES, SEEDS
+from .models.utils import PB_TASKS, ARCHITECTURES, SEEDS
 
 def create_array_script(output_dir):
     """Create a Slurm array script for all jobs."""
@@ -140,7 +142,6 @@ def compile_results(output_dir='results/pb_baselines', save_path=None):
     return results, not missing_results
 
 if __name__ == '__main__':
-    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--output_dir', type=str, default='results/pb_baselines')
     parser.add_argument('--compile_only', action='store_true', 
@@ -164,7 +165,6 @@ if __name__ == '__main__':
         if args.wait and array_job_id:
             print("Waiting for jobs to complete...")
             while not check_job_status(array_job_id):
-                import time
                 time.sleep(60)  # Check every minute
     
     # Compile and save results

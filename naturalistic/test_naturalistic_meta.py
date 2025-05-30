@@ -15,9 +15,10 @@ import sys
 import pickle
 
 # Add parent directory to path to import models
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from conv2 import SameDifferentCNN as Conv2CNN, load_model as load_model_conv2
-from conv4 import SameDifferentCNN as Conv4CNN, load_model as load_model_conv4
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # Commenting out, prefer PYTHONPATH setup
+from meta_baseline.models.conv2lr import SameDifferentCNN as Conv2CNN
+from meta_baseline.models.conv4lr import SameDifferentCNN as Conv4CNN
+from meta_baseline.models.utils_meta import load_model # Use the one from utils_meta
 
 class NaturalisticDataset(Dataset):
     def __init__(self, data_dir, transform=None):
@@ -90,11 +91,11 @@ def main():
     if args.model == 'conv2':
         model_dir = 'conv2lr_runs_20250127_131933'
         model_class = Conv2CNN
-        load_model_fn = load_model_conv2
+        load_model_fn = load_model # Use the imported load_model
     else:  # conv4
         model_dir = 'exp1_(finished)conv4lr_runs_20250126_201548'
         model_class = Conv4CNN
-        load_model_fn = load_model_conv4
+        load_model_fn = load_model # Use the imported load_model
     
     # Construct weight path
     weight_path = os.path.join(model_dir, f'seed_{args.seed}', f'model_seed_{args.seed}_pretesting.pt')

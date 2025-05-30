@@ -13,10 +13,10 @@ import argparse
 from pathlib import Path
 from torchvision import transforms
 
-# Import models directly from current directory
-from conv2 import SameDifferentCNN as Conv2CNN
-from conv4 import SameDifferentCNN as Conv4CNN
-from conv6 import SameDifferentCNN as Conv6CNN
+# Import models from baselines package
+from baselines.models.conv2 import SameDifferentCNN as Conv2CNN
+from baselines.models.conv4 import SameDifferentCNN as Conv4CNN
+from baselines.models.conv6 import SameDifferentCNN as Conv6CNN
 
 class NaturalisticDataset(Dataset):
     """Dataset for naturalistic same/different classification."""

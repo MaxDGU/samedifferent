@@ -2,7 +2,7 @@ import os
 import json
 import numpy as np
 from pathlib import Path
-from models.utils import PB_TASKS, ARCHITECTURES, SEEDS
+from .models.utils import PB_TASKS, ARCHITECTURES, SEEDS
 
 
 #this file TO BE RUN AFTER all seeds have been trained

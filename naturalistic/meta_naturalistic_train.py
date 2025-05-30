@@ -25,10 +25,10 @@ import learn2learn as l2l # Added for MAML
 
 try:
     # Import specific model classes directly
-    from conv2 import SameDifferentCNN as Conv2CNN
-    from conv4 import SameDifferentCNN as Conv4CNN
-    from conv6 import SameDifferentCNN as Conv6CNN
-    print("Successfully imported Conv{2,4,6}CNN models (direct import)")
+    from meta_baseline.models.conv2lr import SameDifferentCNN as Conv2CNN
+    from meta_baseline.models.conv4lr import SameDifferentCNN as Conv4CNN
+    from meta_baseline.models.conv6lr import SameDifferentCNN as Conv6CNN
+    print("Successfully imported Conv{2,4,6}lrCNN models from meta_baseline.models")
 
     # # Attempt to import utils_meta - might fail, handle later
     # try:
