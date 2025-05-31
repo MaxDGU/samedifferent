@@ -1,12 +1,12 @@
 import os
 import subprocess
 from datetime import datetime
-from .models import pb_tasks
+from conv6lr_holdout import pb_tasks
 
 def generate_slurm_script(task, output_dir):
     """Generate a SLURM script for training with a specific held-out task."""
     task_dir = os.path.join(output_dir, f"holdout_{task}")
-    data_dir = "/scratch/gpfs/mg7411/data"  # Path to data directory in della containing pb/pb and svrt_fixed
+    data_dir = "/scratch/gpfs/mg7411/data"  # Path to data directory containing pb/pb and svrt_fixed
     
     return f"""#!/bin/bash
 #SBATCH --job-name=holdout_{task}
@@ -33,7 +33,7 @@ conda activate tensorflow
 mkdir -p {task_dir}
 
 # Run training script
-python -m train_holdout_seeds \\
+python train_holdout_seeds.py \\
     --task {task} \\
     --data_dir {data_dir} \\
     --output_dir {task_dir} \\

@@ -1,0 +1,120 @@
+#!/bin/bash
+set -e # Exit immediately if a command exits with a non-zero status.
+# This script orchestrates an "ideal experiment" with data parity
+# between single-task and MAML training for a specific seed and architecture.
+
+# --- Configuration ---
+SEED_VAL=42                                                           # Seed for all runs
+ARCH="conv6"                                                          # Architecture to test: conv2, conv4, or conv6
+# PYTHON_EXEC="python"                                                # Use "python" or specify path to your python executable
+PYTHON_EXEC="/Users/maxgupta/Desktop/Princeton/CoCoSci_Lab/samedifferent/same_different_paper/metasamedifferent/venv/bin/python" # Example: Update with your actual Python path if not in PATH or if using a venv
+
+# --- Paths ---
+# Assuming this script is in the project root. Adjust if not.
+CODE_ROOT_DIR="." 
+DATA_DIR_H5="${CODE_ROOT_DIR}/data/meta_h5/pb"                        # Path to HDF5 files
+
+# Base output directory for this specific experiment run
+BASE_EXP_DIR_NAME="ideal_datapar_exp_seed${SEED_VAL}_arch${ARCH}"
+TOP_LEVEL_OUTPUT_DIR="${CODE_ROOT_DIR}/results/${BASE_EXP_DIR_NAME}"
+
+SINGLETASK_RESULTS_ROOT="${TOP_LEVEL_OUTPUT_DIR}/single_task_runs"    # Base for single-task outputs
+MAML_RESULTS_ROOT="${TOP_LEVEL_OUTPUT_DIR}/maml_runs"                 # Base for MAML script outputs
+PCA_PLOTS_DIR="${TOP_LEVEL_OUTPUT_DIR}/pca_plots"                     # For PCA plots
+
+# Tasks to iterate over for single-task training
+PB_TASKS=('regular' 'lines' 'open' 'wider_line' 'scrambled' 'random_color' 'arrows' 'irregular' 'filled' 'original')
+
+# MAML parameters for data parity (1 "Super Epoch")
+MAML_EPOCHS=1
+MAML_NUM_META_BATCHES_PER_EPOCH=2250
+MAML_META_BATCH_SIZE=16 # Should match default in experiment_all_tasks_fomaml.py or be passed if configurable there
+
+# --- Create Directories ---
+mkdir -p "${SINGLETASK_RESULTS_ROOT}"
+mkdir -p "${MAML_RESULTS_ROOT}"
+mkdir -p "${PCA_PLOTS_DIR}"
+
+echo "=========================================================="
+echo "=== Starting Ideal Experiment with Data Parity ==="
+echo "=========================================================="
+echo "Seed for all runs: ${SEED_VAL}"
+echo "Architecture: ${ARCH}"
+echo "Single-Task Output Base: ${SINGLETASK_RESULTS_ROOT}"
+echo "MAML Output Base: ${MAML_RESULTS_ROOT}"
+echo "PCA Plot Output: ${PCA_PLOTS_DIR}"
+echo "HDF5 Data Dir: ${DATA_DIR_H5}"
+echo "Python Executable: ${PYTHON_EXEC}"
+echo "----------------------------------------------------------"
+
+# --- 1. Single-Task Runs (1 epoch each) ---
+echo "\n>>> Running Single-Task Trainings (1 epoch each for ${ARCH}, seed ${SEED_VAL})..."
+for task_name in "${PB_TASKS[@]}"; do
+    echo "  Starting single-task training for: Task=${task_name}"
+    # train_single_task_pb.py saves outputs to: <output_dir_base>/<task>/<arch>/seed_<seed>/
+    ${PYTHON_EXEC} "${CODE_ROOT_DIR}/single_task/train_single_task_pb.py" \
+        --task "${task_name}" \
+        --architecture "${ARCH}" \
+        --seed "${SEED_VAL}" \
+        --epochs 1 \
+        --batch_size 32 \
+        --lr 0.001 \
+        --output_dir "${SINGLETASK_RESULTS_ROOT}" \
+        --data_dir "${DATA_DIR_H5}"
+    echo "  Finished single-task training for: Task=${task_name}"
+done
+echo "--- All Single-Task Trainings Finished ---"
+echo "----------------------------------------------------------"
+
+# --- 2. MAML Run (1 "Super Epoch") ---
+echo "\n>>> Running MAML Training (1 Super Epoch for ${ARCH}, seed ${SEED_VAL})..."
+echo "    Using MAML Epochs: ${MAML_EPOCHS}, Meta-Batches/Epoch: ${MAML_NUM_META_BATCHES_PER_EPOCH}"
+# experiment_all_tasks_fomaml.py saves outputs to: <output_base_dir>/exp_all_tasks_fomaml_<arch>_seed<seed>_Svar_Q3_<timestamp>/
+${PYTHON_EXEC} "${CODE_ROOT_DIR}/all_tasks/experiment_all_tasks_fomaml.py" \
+    --architecture "${ARCH}" \
+    --seed "${SEED_VAL}" \
+    --epochs "${MAML_EPOCHS}" \
+    --num_meta_batches_per_epoch "${MAML_NUM_META_BATCHES_PER_EPOCH}" \
+    --meta_batch_size "${MAML_META_BATCH_SIZE}" \
+    --inner_lr 0.001 \
+    --outer_lr 0.0001 \
+    --first_order \
+    --output_base_dir "${MAML_RESULTS_ROOT}" \
+    --data_dir "${DATA_DIR_H5}"
+
+# Find the exact MAML experiment directory created
+# (Assumes only one experiment run for this specific arch/seed in MAML_RESULTS_ROOT by this script invocation)
+MAML_ACTUAL_EXP_DIR=$(find "${MAML_RESULTS_ROOT}" -type d -name "exp_all_tasks_fomaml_${ARCH}_seed${SEED_VAL}_*" -print -quit)
+
+if [ -z "${MAML_ACTUAL_EXP_DIR}" ]; then
+    echo "ERROR: Could not find MAML experiment directory in ${MAML_RESULTS_ROOT}"
+    echo "       Expected pattern: exp_all_tasks_fomaml_${ARCH}_seed${SEED_VAL}_*"
+    exit 1
+fi
+echo "  MAML Experiment Output Directory: ${MAML_ACTUAL_EXP_DIR}"
+echo "--- MAML Training Finished ---"
+echo "----------------------------------------------------------"
+
+# --- 3. PCA Analysis ---
+echo "\n>>> Running PCA Analysis for ${ARCH}, seed ${SEED_VAL}..."
+# analyze_pb_weights.py will need to be updated to use these new arguments
+# to correctly load one initial model, 10 single-task final, and 1 MAML final.
+${PYTHON_EXEC} "${CODE_ROOT_DIR}/weight_space_analysis/analyze_pb_weights.py" \
+    --results_dir "${SINGLETASK_RESULTS_ROOT}" \
+    --output_plot_dir "${PCA_PLOTS_DIR}" \
+    --specific_arch_to_analyze "${ARCH}" \
+    --specific_seed_to_analyze "${SEED_VAL}" \
+    --specific_maml_experiment_path "${MAML_ACTUAL_EXP_DIR}" \
+    # You might want to add common arguments like --maml_runs_base_dir if parts of the script still expect it, 
+    # even if specific_maml_experiment_path overrides the MAML loading.
+    # For this ideal run, --maml_runs_base_dir might not be strictly needed if the specific path is used.
+
+echo "--- PCA Analysis Finished ---"
+echo "=========================================================="
+echo "=== Ideal Experiment Script Complete ==="
+echo "=========================================================="
+echo "Final Outputs:"
+echo "  Single-task models are in subdirectories of: ${SINGLETASK_RESULTS_ROOT}/${ARCH}/seed_${SEED_VAL}/"
+echo "  MAML model is in: ${MAML_ACTUAL_EXP_DIR}"
+echo "  PCA plots should be in: ${PCA_PLOTS_DIR}"
+echo "==========================================================" 

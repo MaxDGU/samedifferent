@@ -2,27 +2,52 @@
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
 
-# Jupyter Notebook
+# Conda
+.conda/
+# If your venv is in the project root, uncomment the next line
+# venv/
+
+# Experiment Results & Models
+results/
+results_*/
+*.pth
+*.pt
+*.pt.best
+model_checkpoints/
+models/ # If models dir contains only generated .pth files
+
+# IDE / OS specific
+.DS_Store
+*.swo
+*.swp
+.vscode/
+.idea/
+
+# Local experiment outputs & temporary directories
+remote/
+ideal_datapar_exp*/
+temp_outputs/
+
+# Data files - if large and not meant for git
+data/*.h5 
+# Be careful with the above, only if H5 files are very large and not version controlled
+
+# Compiled files / build artifacts
+*.so
+*.o
+build/
+dist/
+
+# Log files
+*.log
+logs/
+
+# Notebook checkpoints
 .ipynb_checkpoints
-*.ipynb_checkpoints/
+
+# svrt directory if it's not to be tracked
+svrt/
 
 # Virtual Environment
 venv/
@@ -31,21 +56,12 @@ env/
 .env/
 .venv/
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-.DS_Store
-
 # Project specific
 *.h5
 data/**/*.h5
 learn2learn/
 naturalistic/objectsall/
 naturalistic/objectsall_2/
-logs/
-results/
 slurm_logs/
 *.out
 *.err

@@ -17,9 +17,9 @@ from pathlib import Path # Use pathlib
 # New imports pointing to lr versions
 # Ensure 'meta_baseline' is in PYTHONPATH or sys.path from where this script is run
 # (e.g., by running from the project root or adding project root to PYTHONPATH)
-from meta_baseline.models.conv2lr import SameDifferentCNN as Conv2CNN
-from meta_baseline.models.conv4lr import SameDifferentCNN as Conv4CNN
-from meta_baseline.models.conv6lr import SameDifferentCNN as Conv6CNN
+from baselines.models.conv2 import SameDifferentCNN as Conv2CNN
+from baselines.models.conv4 import SameDifferentCNN as Conv4CNN
+from baselines.models.conv6 import SameDifferentCNN as Conv6CNN
 
 class PBDataset(Dataset):
     """Dataset for PB tasks with balanced task representation."""
@@ -188,7 +188,9 @@ def train_epoch(model, train_loader, criterion, optimizer, device, scaler):
     running_loss = 0.0
     correct = 0
     total = 0
-    
+    batches_processed = 0  # ADDED: to track number of batches for running average
+    output_shape_printed = False # ADDED: flag to print output shape only once
+
     progress_bar = tqdm(train_loader, desc='Training', leave=False)
     for batch in progress_bar:
         images = batch['image'].to(device)
@@ -198,6 +200,12 @@ def train_epoch(model, train_loader, criterion, optimizer, device, scaler):
         
         with torch.cuda.amp.autocast(enabled=(device.type == 'cuda')): # AMP context
              outputs = model(images)
+             
+             # ADDED: Print output shape once
+             if not output_shape_printed:
+                 print(f"DEBUG: Model output shape: {outputs.shape}")
+                 output_shape_printed = True
+
              # Assuming model outputs raw logits for binary classification [N, 2] or [N, 1]
              # If model outputs [N, 2], use outputs[:, 1] or handle appropriately
              # If model outputs [N, 1], use outputs.squeeze(1)
@@ -220,6 +228,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device, scaler):
         scaler.update()
         
         running_loss += loss.item()
+        batches_processed += 1 # ADDED
         # Calculate accuracy from logits
         probs = torch.sigmoid(output_logits) # Get probabilities
         predicted = (probs >= 0.5).float()  # Threshold probabilities
@@ -227,7 +236,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device, scaler):
         correct += (predicted == labels).sum().item()
         
         progress_bar.set_postfix({
-            'loss': f'{running_loss/total:.4f}', # Loss per item might be more stable
+            'loss': f'{running_loss/batches_processed:.4f}', # MODIFIED: Display running average loss per batch
             'acc': f'{100.*correct/total:.2f}%'
         })
     

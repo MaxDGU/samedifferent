@@ -17,9 +17,26 @@ import collections # For defaultdict
 # print(f"Added project root to sys.path: {project_root}")
 
 # Import model definitions
-from baselines.models.conv2 import SameDifferentCNN as Conv2CNN
-from baselines.models.conv4 import SameDifferentCNN as Conv4CNN
-from baselines.models.conv6 import SameDifferentCNN as Conv6CNN
+# MODIFIED: Assuming models are in a sibling 'models' directory or installed
+# Or adjust based on actual structure from where this script is run relative to models.
+# Fallback to direct imports if they are in the same dir or PYTHONPATH is set up.
+try:
+    from baselines.models.conv2 import SameDifferentCNN as Conv2CNN
+    from baselines.models.conv4 import SameDifferentCNN as Conv4CNN
+    from baselines.models.conv6 import SameDifferentCNN as Conv6CNN
+except ImportError:
+    print("Warning: Could not import from baselines.models. Assuming models (conv2, conv4, conv6) are accessible directly or via PYTHONPATH.")
+    # These direct imports might fail if the files aren't structured as such relative to this script.
+    # This is a placeholder; actual model import strategy depends on the project structure.
+    # If analyze_pb_weights.py is inside weight_space_analysis, and models are in sibling 'models' dir:
+    # script_dir = Path(__file__).resolve().parent
+    # project_root_guess = script_dir.parent
+    # sys.path.insert(0, str(project_root_guess / 'models')) 
+    # from conv2 import SameDifferentCNN as Conv2CNN # etc.
+    # For now, assume they are somehow in path:
+    from conv2 import SameDifferentCNN as Conv2CNN
+    from conv4 import SameDifferentCNN as Conv4CNN
+    from conv6 import SameDifferentCNN as Conv6CNN
 
 # --- Constants (should match the run script) ---
 ARCHITECTURES = {
@@ -33,7 +50,7 @@ PB_TASKS = ['regular', 'lines', 'open', 'wider_line', 'scrambled',
 
 # --- Paths for NEW MAML models (trained on all tasks, from newer experiments) ---
 # Base subdirectory within args.maml_runs_base_dir where new MAML experiment folders are located.
-NEW_MAML_RESULTS_SUBDIR = "maml_results_new_2ndorder" 
+NEW_MAML_RESULTS_SUBDIR = "maml_results_new_2" # MODIFIED: Aligning with user logs, was "maml_results_new_2ndorder"
 # The actual experiment folders are like: exp_all_tasks_fomaml_conv6_seed8_Svar_Q3_20250527_210526
 # And the target model file inside is 'best_model.pth'
 
@@ -57,6 +74,8 @@ MAML_LABEL = "MAML (all tasks)"
 def flatten_weights(state_dict):
     """Flattens all parameters in a state_dict into a single numpy vector."""
     all_weights = []
+    if state_dict is None: # ADDED: Handle None state_dict
+        return None
     # Sort keys to ensure consistent order (optional but good practice)
     for key in sorted(state_dict.keys()):
         param = state_dict[key]
@@ -66,6 +85,24 @@ def flatten_weights(state_dict):
     if not all_weights:
         return None
     return np.concatenate(all_weights)
+
+def print_state_dict_summary(state_dict, model_type_label): # ADDED_FUNCTION
+    print(f"    DEBUG: State dict summary for {model_type_label}:")
+    total_params = 0
+    keys_found = 0
+    if state_dict is None:
+        print(f"    DEBUG: State dict for {model_type_label} is None.")
+        return
+    for k, v in sorted(state_dict.items()):
+        keys_found +=1
+        if isinstance(v, torch.Tensor):
+            print(f"      Key: {k}, Shape: {v.shape}, Numel: {v.numel()}")
+            total_params += v.numel()
+        else:
+            print(f"      Key: {k}, Type: {type(v)}")
+    if keys_found == 0:
+        print(f"    DEBUG: State dict for {model_type_label} is empty.")
+    print(f"    DEBUG: Total parameters in {model_type_label} state_dict: {total_params}")
 
 def main(args):
     base_results_dir = Path(args.results_dir)
@@ -84,6 +121,8 @@ def main(args):
     output_plot_dir.mkdir(parents=True, exist_ok=True)
     print(f"Analyzing weights across all PB tasks.")
     print(f"Loading results from: {base_results_dir}")
+    if maml_runs_base_dir and NEW_MAML_RESULTS_SUBDIR:
+        print(f"Loading NEW MAML models from: {maml_runs_base_dir / NEW_MAML_RESULTS_SUBDIR}")
     print(f"Saving plots to: {output_plot_dir}")
 
     # Use a colormap with enough distinct colors for tasks
@@ -97,6 +136,10 @@ def main(args):
     for arch_name, model_class in ARCHITECTURES.items():
         print(f"\n===== Processing Architecture: {arch_name} ====")
         
+        # Flags for printing state_dict summaries once per architecture
+        printed_final_single_task_summary_for_current_arch = False
+        printed_maml_summary_for_current_arch = False
+
         # Lists for FINAL single-task model weights (from best_model.pth)
         all_final_single_task_weight_vectors = []
         all_final_single_task_point_labels = [] # Stores task name
@@ -141,7 +184,12 @@ def main(args):
                 # Load FINAL weights (best_model.pth)
                 if final_model_path.exists():
                     try:
-                        state_dict = torch.load(final_model_path, map_location=torch.device('cpu'))
+                        state_dict = torch.load(final_model_path, map_location=torch.device('cpu'), weights_only=True) # MODIFIED
+                        
+                        if arch_name == 'conv4' and not printed_final_single_task_summary_for_current_arch: # ADDED conditional print
+                            print_state_dict_summary(state_dict, f"FINAL single-task {arch_name} ({task_name}, seed {original_seed_val})")
+                            printed_final_single_task_summary_for_current_arch = True
+
                         flat_weights = flatten_weights(state_dict)
                         
                         if flat_weights is not None:
@@ -157,7 +205,7 @@ def main(args):
                 # Load INITIAL weights (initial_model.pth)
                 if initial_model_path.exists():
                     try:
-                        state_dict = torch.load(initial_model_path, map_location=torch.device('cpu'))
+                        state_dict = torch.load(initial_model_path, map_location=torch.device('cpu'), weights_only=True) # MODIFIED
                         flat_weights = flatten_weights(state_dict)
                         
                         # DEBUG: Print info for the first few initial weights loaded per architecture
@@ -173,8 +221,12 @@ def main(args):
                             all_initial_single_task_point_categories.append('single_task_initial')
                             found_initial_weights += 1
                             task_found_initial_seeds += 1
+                        else: # ADDED debug print
+                            print(f"    Warning: flatten_weights returned None for INITIAL model at {initial_model_path} (state_dict was {'None' if state_dict is None else 'valid but resulted in no weights'})")
                     except Exception as e:
                         print(f"    Error loading INITIAL single-task weights for {arch_name}, task {task_name}, seed_run_idx {original_seed_val} (folder seed_{globally_unique_seed}) from {initial_model_path}: {e}")
+                else: # ADDED debug print
+                    print(f"    INITIAL model path NOT FOUND: {initial_model_path}")
             
         print(f"  Finished loading single-task weights for {arch_name}. Found {found_final_weights} FINAL vectors and {found_initial_weights} INITIAL vectors.")
 
@@ -193,7 +245,7 @@ def main(args):
                     found_matching_folders = list(new_maml_arch_base_path.glob(expected_folder_pattern))
                     
                     if not found_matching_folders:
-                        # print(f"    No folder matching '{expected_folder_pattern}' found in {new_maml_arch_base_path} for seed {seed_val}.")
+                        print(f"    No folder matching '{expected_folder_pattern}' found in {new_maml_arch_base_path} for seed {seed_val}.") # UNCOMMENTED
                         continue
                     if len(found_matching_folders) > 1:
                         print(f"    Warning: Multiple folders matching '{expected_folder_pattern}' found for seed {seed_val}. Using the first one: {found_matching_folders[0]}")
@@ -203,7 +255,7 @@ def main(args):
 
                     if maml_model_path.exists():
                         try:
-                            state_dict_loaded = torch.load(maml_model_path, map_location=torch.device('cpu'))
+                            state_dict_loaded = torch.load(maml_model_path, map_location=torch.device('cpu'), weights_only=True) # MODIFIED
                             state_dict_to_flatten = None
                             if isinstance(state_dict_loaded, dict) and 'model_state_dict' in state_dict_loaded:
                                 state_dict_to_flatten = state_dict_loaded['model_state_dict']
@@ -215,6 +267,10 @@ def main(args):
                                 print(f"    Warning: Loaded MAML model for {arch_name}, seed {seed_val} from {maml_model_path} is not a state_dict or recognized checkpoint format. Type: {type(state_dict_loaded)}")
 
                             if state_dict_to_flatten:
+                                if arch_name == 'conv4' and not printed_maml_summary_for_current_arch: # ADDED conditional print
+                                    print_state_dict_summary(state_dict_to_flatten, f"NEW MAML {arch_name} (seed {seed_val})")
+                                    printed_maml_summary_for_current_arch = True
+
                                 flat_weights = flatten_weights(state_dict_to_flatten)
                                 if flat_weights is not None:
                                     all_maml_weight_vectors.append(flat_weights)
@@ -462,7 +518,8 @@ if __name__ == '__main__':
                         help='Base directory containing the SINGLE-TASK results (e.g., results/pb_single_task)')
     parser.add_argument('--maml_runs_base_dir', type=str, default=None, # New argument
                         help='Base directory where MAML multi-task model parent folders (like exp1_...conv6lr...) are located. '
-                             'If MAML_ALL_TASKS_PARENT_DIRS contains absolute paths, this can be omitted or ignored.')
+                             'If MAML_ALL_TASKS_PARENT_DIRS contains absolute paths, this can be omitted or ignored. '
+                             'The script will look for a subdirectory defined by NEW_MAML_RESULTS_SUBDIR within this base directory.')
     # We will add --vanilla_runs_base_dir later
     parser.add_argument('--output_plot_dir', type=str, default='results/pca_plots_combined',
                         help='Directory to save the generated PCA plots.')

@@ -1,0 +1,46 @@
+% ===== APPENDIX SECTION START =====
+% This section should be placed after your main content but before \end{document}
+
+% Start on a new page and begin appendix
+\clearpage
+\appendix
+
+% Title for the appendix section
+\section{Performance Results}
+\label{app:detailed_results}
+
+% Single wide table with both results side by side
+\begin{table}[h!]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{|l|c|c|c||c|c|c|}
+\hline
+& \multicolumn{3}{c||}{\textbf{Vanilla Learning (Acc \%)}} & \multicolumn{3}{c|}{\textbf{Meta-Learning (Acc \%)}} \\
+\hline
+\textbf{Task} & \textbf{2-Layer} & \textbf{4-Layer} & \textbf{6-Layer} & \textbf{2-Layer} & \textbf{4-Layer} & \textbf{6-Layer} \\
+\hline
+regular & $50.0 \pm 0.0$ & $50.0 \pm 0.0$ & $50.0 \pm 0.0$ & $52.2 \pm 5.0$ & $85.8 \pm 9.9$ & $98.5 \pm 0.7$ \\
+lines & $79.5 \pm 24.1$ & $50.0 \pm 0.0$ & $50.0 \pm 0.0$ & $78.6 \pm 8.0$ & $94.8 \pm 14.9$ & $\mathbf{100.0 \pm 0.1}$ \\
+open & $51.4 \pm 4.3$ & $50.0 \pm 0.0$ & $50.0 \pm 0.0$ & $48.8 \pm 6.0$ & $85.2 \pm 10.3$ & $97.5 \pm 0.8$ \\
+wider\_line & $50.0 \pm 0.0$ & $50.0 \pm 0.0$ & $50.0 \pm 0.0$ & $52.2 \pm 5.0$ & $84.2 \pm 10.4$ & $97.8 \pm 0.7$ \\
+scrambled & $\mathbf{99.1 \pm 0.6}$ & $50.0 \pm 0.0$ & $50.0 \pm 0.0$ & $82.0 \pm 7.0$ & $94.4 \pm 14.8$ & $99.9 \pm 0.1$ \\
+random\_color & $55.0 \pm 0.0$ & $55.0 \pm 0.0$ & $55.0 \pm 0.0$ & $49.8 \pm 4.0$ & $86.3 \pm 7.2$ & $95.0 \pm 0.7$ \\
+arrows & $50.0 \pm 0.0$ & $50.0 \pm 0.0$ & $50.0 \pm 0.0$ & $48.6 \pm 6.0$ & $69.0 \pm 11.6$ & $93.5 \pm 1.8$ \\
+irregular & $50.0 \pm 0.0$ & $54.2 \pm 12.5$ & $50.0 \pm 0.0$ & $45.4 \pm 5.0$ & $83.0 \pm 12.3$ & $99.2 \pm 0.4$ \\
+filled & $52.4 \pm 7.2$ & $50.0 \pm 0.0$ & $50.0 \pm 0.0$ & $54.0 \pm 6.0$ & $84.2 \pm 13.4$ & $97.9 \pm 0.6$ \\
+original & $50.0 \pm 0.0$ & $50.0 \pm 0.0$ & $50.0 \pm 0.0$ & $51.0 \pm 5.0$ & $84.0 \pm 10.9$ & $97.0 \pm 1.3$ \\
+\hline
+\textbf{Average} & $58.7 \pm 16.0$ & $50.9 \pm 1.7$ & $50.5 \pm 1.6$ & $56.3 \pm 12.6$ & $85.1 \pm 7.2$ & $97.6 \pm 2.0$ \\
+\hline
+\end{tabular}}
+\end{table}
+
+\begin{center}
+\parbox{\textwidth}{
+\centering
+\large\textbf{Table 1: Performance comparison between vanilla learning and meta-learning approaches}\\[0.3em]
+\normalsize Results show mean accuracy (\%) ± standard deviation over 10 random seeds for each CNN architecture on the Perceptual Binding tasks. Chance performance is 50\%.
+}
+\end{center}
+
+% ===== APPENDIX SECTION END ===== 
