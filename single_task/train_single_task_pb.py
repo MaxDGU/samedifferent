@@ -1,14 +1,4 @@
-import sys
 import os
-# Add the project root to sys.path
-# This allows imports from 'baselines', 'models', etc., which are at the project root.
-# __file__ is single_task/train_single_task_pb.py
-# os.path.dirname(__file__) is single_task/
-# os.path.abspath(os.path.join(os.path.dirname(__file__), '..')) is the project root
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
 import json
 import h5py
 import torch
@@ -291,10 +281,10 @@ def validate(model, val_loader, criterion, device):
     return avg_loss, avg_acc
 
 def main():
-    parser = argparse.ArgumentParser(description='Train a model on a single PB task.')
     # Initialize device at the very beginning
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    parser = argparse.ArgumentParser(description='Train a model on a single PB task.')
     # Add arguments (task, architecture, seed, epochs, batch_size, lr, data_dir, output_dir, patience, val_freq)
     parser.add_argument('--task', type=str, required=True, help='Name of the PB task to train on.')
     parser.add_argument('--architecture', type=str, required=True, choices=['conv2', 'conv4', 'conv6'], help='Model architecture.')
@@ -309,10 +299,7 @@ def main():
 
     args = parser.parse_args()
 
-    # Initialize model, criterion, optimizer
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # Comment out or remove original
-    print(f"Using device: {device.type}") # Moved device print here for clarity
-
+    # print(f"Using device: {device.type}") # This line can stay or be after args if preferred, device is now defined
     # Ensure output directory exists
     # Save under task_name/architecture/seed_X
     specific_output_dir = Path(args.output_dir) / args.task / args.architecture / f"seed_{args.seed}"
@@ -333,12 +320,14 @@ def main():
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
     # Initialize model, criterion, optimizer
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # REMOVE/COMMENT THIS
+    
     if args.architecture == 'conv2':
-        model = Conv2CNN().to(device) # PB is binary same/different
+        model = Conv2CNN(num_classes=2).to(device) # PB is binary same/different
     elif args.architecture == 'conv4':
-        model = Conv4CNN().to(device)
+        model = Conv4CNN(num_classes=2).to(device)
     elif args.architecture == 'conv6':
-        model = Conv6CNN().to(device)
+        model = Conv6CNN(num_classes=2).to(device)
     else:
         raise ValueError(f"Unsupported architecture: {args.architecture}")
     print(f"Model {args.architecture} initialized.")
@@ -350,7 +339,7 @@ def main():
     
     criterion = nn.BCEWithLogitsLoss() # Suitable for binary classification with raw logits
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    scaler = torch.amp.GradScaler(enabled=(device.type == 'cuda')) # AMP scaler
+    scaler = torch.amp.GradScaler(device_type=device.type, enabled=(device.type == 'cuda')) # MODIFIED AMP scaler
 
     best_val_acc = 0.0
     epochs_no_improve = 0
