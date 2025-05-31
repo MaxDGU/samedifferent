@@ -58,13 +58,13 @@ PATIENCE=15
 
 # --- Array Job Setup ---
 ARCHITECTURES=("conv2lr" "conv4lr" "conv6lr")
-SEEDS=(0 1 2 3 4 5 6 7 8 9) # Using 10 seeds
+SEEDS=(0 1 2 3 4) # Using 5 seeds
 
 NUM_ARCHS=${#ARCHITECTURES[@]}
 NUM_SEEDS=${#SEEDS[@]}
 
 TOTAL_JOBS=$((NUM_ARCHS * NUM_SEEDS))
-#SBATCH --array=0-$((TOTAL_JOBS - 1))%10 # Limit concurrent jobs to 10 if many seeds/archs
+#SBATCH --array=0-$((TOTAL_JOBS - 1))%10 # Limit concurrent jobs to 10
 
 # Calculate architecture and seed for the current Slurm array task ID
 ARCH_INDEX=$((SLURM_ARRAY_TASK_ID / NUM_SEEDS))
