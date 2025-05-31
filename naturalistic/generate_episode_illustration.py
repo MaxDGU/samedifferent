@@ -120,12 +120,12 @@ def main():
     fig, axes = plt.subplots(1, 2, figsize=(8, 4)) # Poster: consider (10,5) or (12,6)
 
     # Display Same image
-    axes[0].imshow(same_image)
+    axes[0].imshow(same_image, interpolation='bicubic')
     axes[0].set_title("Same", fontsize=20, pad=10)
     axes[0].axis('off')
 
     # Display Different image
-    axes[1].imshow(diff_image)
+    axes[1].imshow(diff_image, interpolation='bicubic')
     axes[1].set_title("Different", fontsize=20, pad=10)
     axes[1].axis('off')
 
