@@ -178,10 +178,10 @@ def parse_args():
                         help='Which Conv-N LR model architecture to use')
 
     # Meta-Learning Hyperparameters
-    parser.add_argument('--epochs', type=int, default=100, help='Number of meta-training epochs')
-    parser.add_argument('--episodes_per_epoch', type=int, default=500, help='Number of episodes per training epoch')
-    parser.add_argument('--meta_lr', type=float, default=1e-4, help='Meta-optimizer learning rate (outer loop)')
-    parser.add_argument('--inner_lr', type=float, default=1e-4, help='Inner loop learning rate')
+    parser.add_argument('--epochs', type=int, default=60, help='Number of meta-training epochs')
+    parser.add_argument('--episodes_per_epoch', type=int, default=1000, help='Number of episodes per training epoch')
+    parser.add_argument('--meta_lr', type=float, default=1e-5, help='Meta-optimizer learning rate (outer loop)')
+    parser.add_argument('--inner_lr', type=float, default=1e-5, help='Inner loop learning rate')
     parser.add_argument('--inner_steps', type=int, default=5, help='Number of adaptation steps in inner loop (from reference script)')
     parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the meta-optimizer (AdamW). Default: 0.0 (no decay)')
     parser.add_argument('--grad_clip_norm', type=float, default=1.0, help='Max norm for gradient clipping in the outer loop. Default: 1.0')
@@ -197,7 +197,7 @@ def parse_args():
     parser.add_argument('--max_val_episodes', type=int, default=None,
                         help='Maximum number of episodes to use for validation. Default: all episodes in val set.')
     parser.add_argument('--checkpoint_interval', type=int, default=10, help='Save checkpoint every N epochs')
-    parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping')
+    parser.add_argument('--patience', type=int, default=20, help='Patience for early stopping')
     parser.add_argument('--min_delta', type=float, default=0.001, help='Minimum improvement for early stopping')
 
     return parser.parse_args()
@@ -413,8 +413,8 @@ def main():
                         param_norm = p.grad.data.norm(2)
                         total_norm_before_clip += param_norm.item() ** 2
                 total_norm_before_clip = total_norm_before_clip ** 0.5
-                if i % args.log_interval == 0 or total_norm_before_clip > args.grad_clip_norm * 1.5 : # Log periodically or if norm is high
-                    print(f"DEBUG (Epoch {epoch}, Episode {i}): Grad norm before clip: {total_norm_before_clip:.4f} (Clip at: {args.grad_clip_norm})")
+                # if i % args.log_interval == 0 or total_norm_before_clip > args.grad_clip_norm * 1.5 : # Log periodically or if norm is high
+                #     print(f"DEBUG (Epoch {epoch}, Episode {i}): Grad norm before clip: {total_norm_before_clip:.4f} (Clip at: {args.grad_clip_norm})")
                 torch.nn.utils.clip_grad_norm_(maml.parameters(), max_norm=args.grad_clip_norm)
                 scaler.step(meta_optimizer)
                 scaler.update()
@@ -427,8 +427,8 @@ def main():
                         param_norm = p.grad.data.norm(2)
                         total_norm_before_clip += param_norm.item() ** 2
                 total_norm_before_clip = total_norm_before_clip ** 0.5
-                if i % args.log_interval == 0 or total_norm_before_clip > args.grad_clip_norm * 1.5: # Log periodically or if norm is high
-                     print(f"DEBUG (Epoch {epoch}, Episode {i}): Grad norm before clip: {total_norm_before_clip:.4f} (Clip at: {args.grad_clip_norm})")
+                # if i % args.log_interval == 0 or total_norm_before_clip > args.grad_clip_norm * 1.5: # Log periodically or if norm is high
+                #      print(f"DEBUG (Epoch {epoch}, Episode {i}): Grad norm before clip: {total_norm_before_clip:.4f} (Clip at: {args.grad_clip_norm})")
                 torch.nn.utils.clip_grad_norm_(maml.parameters(), max_norm=args.grad_clip_norm)
                 meta_optimizer.step()
 
@@ -560,7 +560,7 @@ def main():
             if best_model_path.exists():
                 print(f"Loading best model for testing from: {best_model_path}")
                 try:
-                    checkpoint = torch.load(best_model_path, map_location=device)
+                    checkpoint = torch.load(best_model_path, map_location=device, weights_only=True)
                     # Load base model state
                     model.load_state_dict(checkpoint['model_state_dict'])
                     # Load MAML wrapper state (includes parameters of the meta-optimizer if maml itself has params, but mainly for first_order, lr etc.)
