@@ -334,11 +334,11 @@ def main():
 
     # Initialize model, criterion, optimizer
     if args.architecture == 'conv2':
-        model = Conv2CNN(num_classes=2).to(device) # PB is binary same/different
+        model = Conv2CNN().to(device) # PB is binary same/different
     elif args.architecture == 'conv4':
-        model = Conv4CNN(num_classes=2).to(device)
+        model = Conv4CNN().to(device)
     elif args.architecture == 'conv6':
-        model = Conv6CNN(num_classes=2).to(device)
+        model = Conv6CNN().to(device)
     else:
         raise ValueError(f"Unsupported architecture: {args.architecture}")
     print(f"Model {args.architecture} initialized.")
