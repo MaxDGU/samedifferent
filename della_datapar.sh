@@ -9,7 +9,8 @@ export PYTHONPATH=$PYTHONPATH:/scratch/gpfs/mg7411/samedifferent # Add project r
 # --- Configuration ---
 SEED_VAL=42                                                           # Seed for all runs
 ARCH="conv6"                                                          # Architecture to test: conv2, conv4, or conv6
-PYTHON_EXEC="/opt/anaconda3/envs/tensorflow/bin/python"               # Python executable on Della
+# PYTHON_EXEC="/opt/anaconda3/envs/tensorflow/bin/python"               # Python executable on Della (Old)
+PYTHON_EXEC="python"                                                  # Rely on conda env's Python
 
 # --- Paths ---
 # Assuming this script is in the project root on Della: /scratch/gpfs/mg7411/samedifferent
