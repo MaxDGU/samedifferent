@@ -6,6 +6,8 @@
 #SBATCH --mem=16G
 #SBATCH --time=08:00:00      # Adjust as needed, e.g., 8 hours
 #SBATCH --gres=gpu:1         # Request 1 GPU
+#SBATCH --partition=pli
+#SBATCH --account=nam
 #SBATCH --output=slurm_logs/naturalistic/meta_train_%A_%a.out # Path relative to submission dir
 #SBATCH --error=slurm_logs/naturalistic/meta_train_%A_%a.err  # Path relative to submission dir
 
@@ -82,7 +84,7 @@ echo "Time: $(date)"
 echo "Loading modules..."
 module purge # Start with a clean environment
 module load anaconda3/2023.9 # Or your preferred Anaconda module on Della
-module load cuda/11.8      # Or your preferred CUDA module
+module load cudatoolkit/11.8      # Or your preferred CUDA module
 
 # Activate your conda environment
 CONDA_ENV_NAME="tensorflow" # Replace with your environment name
