@@ -175,10 +175,11 @@ def parse_args():
     # Meta-Learning Hyperparameters
     parser.add_argument('--epochs', type=int, default=100, help='Number of meta-training epochs')
     parser.add_argument('--episodes_per_epoch', type=int, default=500, help='Number of episodes per training epoch')
-    parser.add_argument('--meta_lr', type=float, default=1e-3, help='Meta-optimizer learning rate (outer loop)')
-    parser.add_argument('--inner_lr', type=float, default=0.001, help='Inner loop learning rate')
+    parser.add_argument('--meta_lr', type=float, default=1e-4, help='Meta-optimizer learning rate (outer loop)')
+    parser.add_argument('--inner_lr', type=float, default=1e-4, help='Inner loop learning rate')
     parser.add_argument('--inner_steps', type=int, default=5, help='Number of adaptation steps in inner loop (from reference script)')
     parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the meta-optimizer (AdamW). Default: 0.0 (no decay)')
+    parser.add_argument('--grad_clip_norm', type=float, default=1.0, help='Max norm for gradient clipping in the outer loop. Default: 1.0')
 
     # Training Settings
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
@@ -227,6 +228,9 @@ def fast_adapt(batch, learner, loss_fn, adaptation_steps, device, episode_idx_de
             adaptation_logits = learner(support_images) # Calls learner.forward -> learner.module.forward
             adaptation_error = loss_fn(adaptation_logits, support_labels)
 
+            if torch.isnan(adaptation_error) or torch.isinf(adaptation_error) or adaptation_error.item() > 1e6:
+                print(f"WARNING (fast_adapt {episode_idx_debug}, Inner Step {step+1}): Unstable adaptation_error: {adaptation_error.item()}")
+
             # --- Critical Debug for Validation --- 
             # if episode_idx_debug.startswith("val_ep") and step == 0: # Only print for first validation step once per episode
             #     print(f"DEBUG VALIDATION (Episode: {episode_idx_debug}, Inner Step: {step+1}):")
@@ -258,6 +262,9 @@ def fast_adapt(batch, learner, loss_fn, adaptation_steps, device, episode_idx_de
     evaluation_logits = learner(query_images)
     evaluation_error = loss_fn(evaluation_logits, query_labels)
     evaluation_acc = accuracy(evaluation_logits, query_labels)
+
+    if torch.isnan(evaluation_error) or torch.isinf(evaluation_error) or evaluation_error.item() > 1e6:
+        print(f"WARNING (fast_adapt {episode_idx_debug}): Unstable evaluation_error: {evaluation_error.item()}")
 
     return evaluation_error, evaluation_acc
 
@@ -391,12 +398,30 @@ def main():
             if is_cuda_and_amp_enabled:
                 scaler.scale(meta_batch_loss).backward()
                 scaler.unscale_(meta_optimizer) # Unscale before clipping
-                torch.nn.utils.clip_grad_norm_(maml.parameters(), max_norm=5.0) # ADDED: Gradient Clipping
+                # Calculate and print grad norm before clipping
+                total_norm_before_clip = 0.0
+                for p in maml.parameters():
+                    if p.grad is not None:
+                        param_norm = p.grad.data.norm(2)
+                        total_norm_before_clip += param_norm.item() ** 2
+                total_norm_before_clip = total_norm_before_clip ** 0.5
+                if i % args.log_interval == 0 or total_norm_before_clip > args.grad_clip_norm * 1.5 : # Log periodically or if norm is high
+                    print(f"DEBUG (Epoch {epoch}, Episode {i}): Grad norm before clip: {total_norm_before_clip:.4f} (Clip at: {args.grad_clip_norm})")
+                torch.nn.utils.clip_grad_norm_(maml.parameters(), max_norm=args.grad_clip_norm)
                 scaler.step(meta_optimizer)
                 scaler.update()
             else: # CPU or AMP disabled
                 meta_batch_loss.backward()
-                torch.nn.utils.clip_grad_norm_(maml.parameters(), max_norm=5.0) # ADDED: Gradient Clipping
+                # Calculate and print grad norm before clipping
+                total_norm_before_clip = 0.0
+                for p in maml.parameters():
+                    if p.grad is not None:
+                        param_norm = p.grad.data.norm(2)
+                        total_norm_before_clip += param_norm.item() ** 2
+                total_norm_before_clip = total_norm_before_clip ** 0.5
+                if i % args.log_interval == 0 or total_norm_before_clip > args.grad_clip_norm * 1.5: # Log periodically or if norm is high
+                     print(f"DEBUG (Epoch {epoch}, Episode {i}): Grad norm before clip: {total_norm_before_clip:.4f} (Clip at: {args.grad_clip_norm})")
+                torch.nn.utils.clip_grad_norm_(maml.parameters(), max_norm=args.grad_clip_norm)
                 meta_optimizer.step()
 
             meta_train_loss += meta_batch_loss.item()
