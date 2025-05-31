@@ -14,8 +14,8 @@ PYTHON_EXEC="/opt/anaconda3/envs/tensorflow/bin/python"               # Python e
 # --- Paths ---
 # Assuming this script is in the project root on Della: /scratch/gpfs/mg7411/samedifferent
 CODE_ROOT_DIR="." 
-# DATA_DIR_H5="${CODE_ROOT_DIR}/data/meta_h5/pb"                        # Original local path
-DATA_DIR_H5="/scratch/gpfs/mg7411/data/pb/pb"                         # Path to HDF5 files on Della
+# DATA_DIR_H5="/scratch/gpfs/mg7411/data/pb/pb"                        # Old Della path
+DATA_DIR_H5="/scratch/gpfs/mg7411/samedifferent/data/meta_h5/pb"      # Corrected Path to HDF5 files on Della
 
 # Base output directory for this specific experiment run
 # Outputs will be relative to the CODE_ROOT_DIR on Della
