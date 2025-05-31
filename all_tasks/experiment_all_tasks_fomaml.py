@@ -237,7 +237,7 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
                     print(f"CRITICAL: NaN/Inf support_loss detected. Arch: {current_arch}, E{epoch_num} B{meta_batch_idx} T{task_idx} AS{adapt_step}. Loss: {support_loss.item()}. Skipping adapt for this step.")
                     break 
                 
-                learner.adapt(support_loss, allow_unused=False, allow_nograd=False)
+                learner.adapt(support_loss, allow_unused=False, allow_nograd=True)
                 print_debug_stats("AdaptStepPostAdapt", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, adapt_step=adapt_step, learner=learner)
             else: 
                 with torch.amp.autocast(device_type=device.type, enabled=scaler is not None):
@@ -337,7 +337,7 @@ def validate_or_test(maml, dataloader, device, adaptation_steps, mode='Validatin
                 if torch.isnan(support_loss) or torch.isinf(support_loss):
                     print(f"Warning: NaN/Inf support_loss during {mode} adaptation. Skipping adapt for this step.")
                     break
-                learner.adapt(support_loss, allow_unused=False, allow_nograd=False) # allow_nograd=False
+                learner.adapt(support_loss, allow_unused=False, allow_nograd=True) # allow_nograd=True
             else: # Continue if adaptation completed
                 if mode == 'Testing':
                     learner.eval() # Switch to eval mode for query evaluation using adapted BN stats.
@@ -450,9 +450,10 @@ def main(args):
         model,
         lr=effective_inner_lr, # Use the potentially adjusted inner_lr
         first_order=args.first_order, # FOMAML or MAML
-        allow_nograd=False, # As per user requirement
-        allow_unused=False  # As per user requirement
+        allow_unused=args.track_running_stats_maml, # Or False if track_running_stats_maml is not for this
+        allow_nograd=True # Ensure this is True for first_order
     )
+    maml.to(device)
     optimizer = torch.optim.AdamW(maml.parameters(), lr=args.outer_lr, weight_decay=args.weight_decay)
     
     # AMP Scaler
