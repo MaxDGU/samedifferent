@@ -168,7 +168,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Meta-Training on Naturalistic Same-Different Dataset")
 
     # Paths
-    parser.add_argument('--data_dir', type=str, default='naturalistic/meta',
+    parser.add_argument('--data_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/data/naturalistic',
                         help='Directory containing train.h5, val.h5, test.h5')
     parser.add_argument('--log_dir', type=str, default='logs',
                         help='Directory to save logs and model checkpoints')
@@ -527,6 +527,97 @@ def main():
     train_dataset.close()
     val_dataset.close()
     # Consider adding test loop here if needed, loading best model
+
+    # --- Test Loop ---
+    print("\nStarting testing phase...")
+    test_h5_path = Path(args.data_dir) / 'test.h5'
+    if not test_h5_path.exists():
+        print(f"Test data file not found: {test_h5_path}. Skipping testing.")
+    else:
+        try:
+            test_dataset = MetaNaturalisticDataset(test_h5_path, transform=transform)
+            test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=args.num_workers)
+        except Exception as e:
+            print(f"Error loading test dataset: {e}. Skipping testing.")
+            if 'test_dataset' in locals() and hasattr(test_dataset, 'close'): test_dataset.close()
+            test_loader = None
+
+        if test_loader:
+            best_model_path = log_dir / f"{args.model}_best.pth"
+            if best_model_path.exists():
+                print(f"Loading best model for testing from: {best_model_path}")
+                try:
+                    checkpoint = torch.load(best_model_path, map_location=device)
+                    # Load base model state
+                    model.load_state_dict(checkpoint['model_state_dict'])
+                    # Load MAML wrapper state (includes parameters of the meta-optimizer if maml itself has params, but mainly for first_order, lr etc.)
+                    # The actual model parameters are within 'model'. MAML uses these.
+                    # If MAML was saved with its own state_dict (e.g. for learned LR in some variants, or specific MAML params)
+                    if 'maml_state_dict' in checkpoint:
+                         maml.load_state_dict(checkpoint['maml_state_dict'])
+                    else: # Fallback for older checkpoints or if maml_state_dict isn't strictly needed for inference pass
+                         # Re-initialize MAML with the loaded model if only model_state_dict was present
+                         # This ensures the MAML wrapper has the correct, trained model parameters.
+                         maml = l2l.algorithms.MAML(
+                             model, # The model now has the loaded best weights
+                             lr=args.inner_lr,
+                             first_order=False, # As used in training
+                             allow_unused=True,
+                             allow_nograd=True
+                         )
+                         maml.to(device)
+                    print("Best model loaded successfully.")
+                except Exception as e:
+                    print(f"Error loading best model checkpoint: {e}. Skipping testing.")
+                    test_loader = None # Prevent testing if model load fails
+
+            else:
+                print(f"Best model checkpoint not found at {best_model_path}. Skipping testing.")
+                test_loader = None
+
+            if test_loader:
+                maml.eval() # Set MAML (and base model) to eval mode
+                meta_test_loss = 0.0
+                meta_test_acc = 0.0
+                test_episodes = 0
+                
+                is_cuda_and_amp_enabled = args.device == 'cuda' and torch.cuda.is_available() # Re-check based on args for safety
+
+                pbar_test = tqdm(test_loader, desc="Testing")
+                
+                # No gradients needed for testing
+                with torch.no_grad():
+                    for batch_idx, batch in enumerate(pbar_test):
+                        task_batch = [d.squeeze(0) for d in batch]
+                        
+                        with torch.amp.autocast(device_type=args.device if is_cuda_and_amp_enabled else 'cpu', dtype=torch.bfloat16 if is_cuda_and_amp_enabled else torch.float32, enabled=is_cuda_and_amp_enabled):
+                            learner = maml.clone() # Clone for adaptation
+                            evaluation_loss, evaluation_acc = fast_adapt(task_batch,
+                                                                           learner,
+                                                                           criterion,
+                                                                           args.inner_steps, # Adaptation steps
+                                                                           device,
+                                                                           episode_idx_debug=f"test_ep_{batch_idx}",
+                                                                           force_first_order_adapt=True) # Force first_order for test
+                        
+                        meta_test_loss += evaluation_loss.item()
+                        meta_test_acc += evaluation_acc.item()
+                        test_episodes += 1
+                        pbar_test.set_postfix(loss=f"{evaluation_loss.item():.4f}", acc=f"{evaluation_acc.item():.3f}")
+
+                        del learner, task_batch, evaluation_loss, evaluation_acc
+                        if device == 'cuda': torch.cuda.empty_cache()
+
+                if test_episodes > 0:
+                    avg_test_loss = meta_test_loss / test_episodes
+                    avg_test_acc = meta_test_acc / test_episodes
+                    print(f"Test Results: Avg Loss: {avg_test_loss:.4f}, Avg Acc: {avg_test_acc:.3f} across {test_episodes} episodes.")
+                else:
+                    print("No episodes processed in the test set.")
+                
+                gc.collect()
+            
+            test_dataset.close()
 
 if __name__ == "__main__":
     main() 
