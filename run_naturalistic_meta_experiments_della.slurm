@@ -6,6 +6,8 @@
 #SBATCH --mem=32G                # Memory per node
 #SBATCH --time=24:00:00          # Walltime limit (HH:MM:SS)
 #SBATCH --gres=gpu:1             # Number of GPUs per node
+#SBATCH --partition=pli
+#SBATCH --account=nam
 #SBATCH --output=slurm_logs/meta_nat_exp_%A_%a.out # Standard output and error log, %A is job ID, %a is array task ID
 #SBATCH --array=0-8              # Array job: 3 seeds * 3 architectures = 9 jobs (0-8)
 
