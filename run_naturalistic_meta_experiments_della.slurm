@@ -3,8 +3,8 @@
 #SBATCH --nodes=1                # Number of nodes
 #SBATCH --ntasks=1               # Number of tasks (MPI processes)
 #SBATCH --cpus-per-task=4        # Number of CPU cores per task
-#SBATCH --mem=32G                # Memory per node
-#SBATCH --time=24:00:00          # Walltime limit (HH:MM:SS)
+#SBATCH --mem=16G                # Memory per node
+#SBATCH --time=10::00:00          # Walltime limit (HH:MM:SS)
 #SBATCH --gres=gpu:1             # Number of GPUs per node
 #SBATCH --partition=pli
 #SBATCH --account=nam
@@ -16,7 +16,7 @@ echo "Setting up environment..."
 source /usr/share/Modules/init/bash # Initialize environment modules
 module purge                     # Remove any inherited modules
 module load anaconda3/2023.9      # Load Anaconda
-source activate samediff_env       # Activate your conda environment
+source activate tensorflow       # Activate your conda environment
 echo "Conda environment activated: $CONDA_DEFAULT_ENV"
 echo "Python executable: $(which python)"
 
