@@ -15,6 +15,11 @@ import sys # Added for path adjustment
 import gc # Added for memory management
 import learn2learn as l2l # Added for MAML
 
+# Add project root to sys.path to allow for 'from baselines.models...' imports
+# Assumes the script is in <project_root>/naturalistic/
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+
 # --- Model Imports ---
 # Script and models are assumed to be in the same directory or on PYTHONPATH
 # No complex sys.path manipulation needed if running from the directory containing these files.
