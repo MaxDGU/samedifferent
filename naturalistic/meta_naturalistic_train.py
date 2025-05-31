@@ -25,10 +25,10 @@ import learn2learn as l2l # Added for MAML
 
 try:
     # Import specific model classes directly
-    from meta_baseline.models.conv2lr import SameDifferentCNN as Conv2CNN
-    from meta_baseline.models.conv4lr import SameDifferentCNN as Conv4CNN
-    from meta_baseline.models.conv6lr import SameDifferentCNN as Conv6CNN
-    print("Successfully imported Conv{2,4,6}lrCNN models from meta_baseline.models")
+    from baselines.models.conv2 import SameDifferentCNN as Conv2CNN
+    from baselines.models.conv4 import SameDifferentCNN as Conv4CNN
+    from baselines.models.conv6 import SameDifferentCNN as Conv6CNN
+    print("Successfully imported Conv{2,4,6}lrCNN models from baselines.models")
 
     # # Attempt to import utils_meta - might fail, handle later
     # try:
@@ -176,7 +176,7 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=100, help='Number of meta-training epochs')
     parser.add_argument('--episodes_per_epoch', type=int, default=500, help='Number of episodes per training epoch')
     parser.add_argument('--meta_lr', type=float, default=1e-3, help='Meta-optimizer learning rate (outer loop)')
-    parser.add_argument('--inner_lr', type=float, default=0.05, help='Inner loop learning rate (from reference script)') # Changed default
+    parser.add_argument('--inner_lr', type=float, default=0.001, help='Inner loop learning rate')
     parser.add_argument('--inner_steps', type=int, default=5, help='Number of adaptation steps in inner loop (from reference script)')
     parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the meta-optimizer (AdamW). Default: 0.0 (no decay)')
 
@@ -194,7 +194,7 @@ def parse_args():
     return parser.parse_args()
 
 # --- MAML Helper Function (Manual Implementation) ---
-def fast_adapt(batch, learner, loss_fn, adaptation_steps, device):
+def fast_adapt(batch, learner, loss_fn, adaptation_steps, device, episode_idx_debug="N/A", force_first_order_adapt=False):
     """
     Manual implementation of MAML adaptation and evaluation step.
     Derived from typical learn2learn usage.
@@ -208,15 +208,47 @@ def fast_adapt(batch, learner, loss_fn, adaptation_steps, device):
     original_learner_training_state = learner.training
     learner.train() 
 
+    # Determine if this adaptation step should be first_order
+    is_adapt_first_order = learner.first_order # Default from learner
+    if force_first_order_adapt: # If True, force it for this call (e.g., during validation)
+        is_adapt_first_order = True
+
     # Adapt the model
     for step in range(adaptation_steps):
         # Enable gradient computation for this specific adaptation step's forward pass
         with torch.enable_grad():
+            # --- Crucial fix for validation context ---
+            if episode_idx_debug.startswith("val_ep") or force_first_order_adapt: # More general condition for safety
+                # When in validation (or forced first_order), ensure learner params require grad after cloning
+                for p in learner.module.parameters():
+                    p.requires_grad_(True)
+            # --- End crucial fix ---
+
             adaptation_logits = learner(support_images) # Calls learner.forward -> learner.module.forward
             adaptation_error = loss_fn(adaptation_logits, support_labels)
-        
+
+            # --- Critical Debug for Validation --- 
+            # if episode_idx_debug.startswith("val_ep") and step == 0: # Only print for first validation step once per episode
+            #     print(f"DEBUG VALIDATION (Episode: {episode_idx_debug}, Inner Step: {step+1}):")
+            #     print(f"  adaptation_error: val={adaptation_error.item():.4f}, requires_grad={adaptation_error.requires_grad}, grad_fn is set: {adaptation_error.grad_fn is not None}")
+            #     # Check a few learner parameters
+            #     learner_params_req_grad = [(n, p.requires_grad) for n, p in learner.module.named_parameters()]
+            #     print(f"  Learner param requires_grad status (first 3): {learner_params_req_grad[:3]}")
+            #     if not all(p[1] for p in learner_params_req_grad):
+            #         print(f"  WARNING: Some learner params do not require grad: {[n for n,rg in learner_params_req_grad if not rg]}")
+            # --- End Critical Debug ---
+            
+            if adaptation_error.isnan():
+                print(f"ERROR: NaN loss detected at Episode {episode_idx_debug}, Inner step {step+1}. Stopping adaptation.")
+                # Optionally, you could raise an error here or return a specific indicator
+                # For now, we'll let it proceed to learner.adapt which will likely raise the RuntimeError
+                # This helps confirm the NaN is the source.
+                # To prevent the RuntimeError and debug further, one might return (NaN, NaN) from fast_adapt here.
+
         # Compute gradients and update the learner (cloned model)
-        learner.adapt(adaptation_error)
+        # DEBUG PRINT TO CONFIRM (can be removed later)
+        # print(f"DEBUG ADAPT CALL (Episode: {episode_idx_debug}, Step: {step+1}): learner.first_order={learner.first_order}, force_first_order_adapt={force_first_order_adapt}, is_adapt_first_order={is_adapt_first_order}, adaptation_error.requires_grad={adaptation_error.requires_grad}, adaptation_error.grad_fn={adaptation_error.grad_fn is not None}")
+        learner.adapt(adaptation_error, first_order=is_adapt_first_order) # MODIFIED: Pass determined first_order status
 
     # Restore original training mode of the learner for the final evaluation on the query set
     learner.train(original_learner_training_state) 
@@ -346,7 +378,9 @@ def main():
                                                                learner, 
                                                                criterion, 
                                                                args.inner_steps, 
-                                                               device)
+                                                               device,
+                                                               episode_idx_debug=f"train_ep_{i}",
+                                                               force_first_order_adapt=False)
             
             # Average the evaluation loss/acc across tasks in the meta-batch (batch_size=1 here)
             # For meta-batch > 1, you would average evaluation_loss across the batch before backward
@@ -356,10 +390,13 @@ def main():
             # Backpropagate meta-loss and update MAML parameters
             if is_cuda_and_amp_enabled:
                 scaler.scale(meta_batch_loss).backward()
+                scaler.unscale_(meta_optimizer) # Unscale before clipping
+                torch.nn.utils.clip_grad_norm_(maml.parameters(), max_norm=5.0) # ADDED: Gradient Clipping
                 scaler.step(meta_optimizer)
                 scaler.update()
             else: # CPU or AMP disabled
                 meta_batch_loss.backward()
+                torch.nn.utils.clip_grad_norm_(maml.parameters(), max_norm=5.0) # ADDED: Gradient Clipping
                 meta_optimizer.step()
 
             meta_train_loss += meta_batch_loss.item()
@@ -396,7 +433,9 @@ def main():
                                                                        learner, 
                                                                        criterion, 
                                                                        args.inner_steps, # Use train steps or define separate val_steps? 
-                                                                       device)
+                                                                       device,
+                                                                       episode_idx_debug=f"val_ep_{val_episodes}",
+                                                                       force_first_order_adapt=True) # MODIFIED: Force first_order for validation
                     
                     meta_val_loss += evaluation_loss.item()
                     meta_val_acc += evaluation_acc.item()

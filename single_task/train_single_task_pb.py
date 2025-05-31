@@ -188,8 +188,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device, scaler):
     running_loss = 0.0
     correct = 0
     total = 0
-    batches_processed = 0  # ADDED: to track number of batches for running average
-    output_shape_printed = False # ADDED: flag to print output shape only once
+    batches_processed = 0
 
     progress_bar = tqdm(train_loader, desc='Training', leave=False)
     for batch in progress_bar:
@@ -198,14 +197,9 @@ def train_epoch(model, train_loader, criterion, optimizer, device, scaler):
         
         optimizer.zero_grad()
         
-        with torch.cuda.amp.autocast(enabled=(device.type == 'cuda')): # AMP context
+        with torch.amp.autocast(device_type=device.type, enabled=(device.type == 'cuda')): # MODIFIED AMP context
              outputs = model(images)
              
-             # ADDED: Print output shape once
-             if not output_shape_printed:
-                 print(f"DEBUG: Model output shape: {outputs.shape}")
-                 output_shape_printed = True
-
              # Assuming model outputs raw logits for binary classification [N, 2] or [N, 1]
              # If model outputs [N, 2], use outputs[:, 1] or handle appropriately
              # If model outputs [N, 1], use outputs.squeeze(1)
@@ -228,7 +222,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device, scaler):
         scaler.update()
         
         running_loss += loss.item()
-        batches_processed += 1 # ADDED
+        batches_processed += 1
         # Calculate accuracy from logits
         probs = torch.sigmoid(output_logits) # Get probabilities
         predicted = (probs >= 0.5).float()  # Threshold probabilities
@@ -236,7 +230,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device, scaler):
         correct += (predicted == labels).sum().item()
         
         progress_bar.set_postfix({
-            'loss': f'{running_loss/batches_processed:.4f}', # MODIFIED: Display running average loss per batch
+            'loss': f'{running_loss/batches_processed:.4f}',
             'acc': f'{100.*correct/total:.2f}%'
         })
     
@@ -287,107 +281,99 @@ def validate(model, val_loader, criterion, device):
     return avg_loss, avg_acc
 
 def main():
-    parser = argparse.ArgumentParser()
-    # Changed --test_task to --task
-    parser.add_argument('--task', type=str, required=True, help='PB task to train and test on') 
-    parser.add_argument('--architecture', type=str, required=True, choices=['conv2', 'conv4', 'conv6'])
-    parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--lr', type=float, default=0.001)
-    parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--patience', type=int, default=10) # Increased default patience
-    parser.add_argument('--val_freq', type=int, default=5) # Validate more often
-    parser.add_argument('--improvement_threshold', type=float, default=0.005) # Smaller threshold
-    parser.add_argument('--data_dir', type=str, default='data/pb/pb')
-    # Changed output directory base
-    parser.add_argument('--output_dir', type=str, default='results/pb_single_task') 
+    parser = argparse.ArgumentParser(description='Train a model on a single PB task.')
+    # Initialize device at the very beginning
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Add arguments (task, architecture, seed, epochs, batch_size, lr, data_dir, output_dir, patience, val_freq)
+    parser.add_argument('--task', type=str, required=True, help='Name of the PB task to train on.')
+    parser.add_argument('--architecture', type=str, required=True, choices=['conv2', 'conv4', 'conv6'], help='Model architecture.')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed.')
+    parser.add_argument('--epochs', type=int, default=100, help='Number of epochs to train.')
+    parser.add_argument('--batch_size', type=int, default=32, help='Batch size.')
+    parser.add_argument('--lr', type=float, default=0.001, help='Learning rate.')
+    parser.add_argument('--data_dir', type=str, default='data/meta_h5/pb', help='Directory containing HDF5 task files.')
+    parser.add_argument('--output_dir', type=str, default='results/single_task_test', help='Directory to save results and models.')
+    parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping.')
+    parser.add_argument('--val_freq', type=int, default=5, help='Frequency (in epochs) to run validation.')
+
     args = parser.parse_args()
-    
-    # Set random seed
+
+    # Initialize model, criterion, optimizer
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # Comment out or remove original
+    print(f"Using device: {device.type}") # Moved device print here for clarity
+
+    # Ensure output directory exists
+    # Save under task_name/architecture/seed_X
+    specific_output_dir = Path(args.output_dir) / args.task / args.architecture / f"seed_{args.seed}"
+    specific_output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Saving results to: {specific_output_dir}")
+
+    # Set seed for reproducibility
     set_seed(args.seed)
-    
-    # Setup device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-    
-    # Create output directory structure for this specific task/model/seed run
-    model_dir = Path(args.output_dir) / args.task / args.architecture / f"seed_{args.seed}"
-    model_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Saving results to: {model_dir}")
-    
-    # Create datasets and dataloaders for the single specified task
+
+    # Load data
     print(f"\nLoading data for task: {args.task}")
-    try:
-        # Pass task as a list
-        train_dataset = PBDataset(args.data_dir, [args.task], split='train') 
-        val_dataset = PBDataset(args.data_dir, [args.task], split='val')
-        test_dataset = PBDataset(args.data_dir, [args.task], split='test')
-    except ValueError as e:
-         print(f"Error creating datasets: {e}")
-         return # Exit if datasets couldn't be loaded
+    train_dataset = PBDataset(args.data_dir, args.task, split='train')
+    val_dataset = PBDataset(args.data_dir, args.task, split='val')
+    test_dataset = PBDataset(args.data_dir, args.task, split='test')
     
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=(device.type == 'cuda'))
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=(device.type == 'cuda'))
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=(device.type == 'cuda'))
-    
-    # Initialize model
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
+
+    # Initialize model, criterion, optimizer
     if args.architecture == 'conv2':
-        model = Conv2CNN()
+        model = Conv2CNN(num_classes=2).to(device) # PB is binary same/different
     elif args.architecture == 'conv4':
-        model = Conv4CNN()
-    else:  # conv6
-        model = Conv6CNN()
-    
-    model = model.to(device)
+        model = Conv4CNN(num_classes=2).to(device)
+    elif args.architecture == 'conv6':
+        model = Conv6CNN(num_classes=2).to(device)
+    else:
+        raise ValueError(f"Unsupported architecture: {args.architecture}")
     print(f"Model {args.architecture} initialized.")
-    
-    # --- Save initial model weights ---
-    initial_model_path = model_dir / 'initial_model.pth'
-    try:
-        torch.save(model.state_dict(), initial_model_path)
-        print(f"Saved initial model weights to {initial_model_path}")
-    except Exception as e:
-        print(f"Error saving initial model weights: {e}")
-    # ---------------------------------
 
-    # Setup training
-    criterion = nn.BCEWithLogitsLoss() # Good choice for binary classification logits
+    # Save initial model weights
+    initial_model_path = specific_output_dir / "initial_model.pth"
+    torch.save(model.state_dict(), initial_model_path)
+    print(f"Saved initial model weights to {initial_model_path}")
+    
+    criterion = nn.BCEWithLogitsLoss() # Suitable for binary classification with raw logits
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == 'cuda')) # AMP scaler
+    scaler = torch.amp.GradScaler(device_type=device.type, enabled=(device.type == 'cuda')) # MODIFIED AMP scaler
 
-    # Training loop
-    best_val_acc = 0
-    patience_counter = 0
-    training_history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
-    
+    best_val_acc = 0.0
+    epochs_no_improve = 0
+    metrics_history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
+
     print("\nStarting Training...")
     for epoch in range(1, args.epochs + 1):
         print(f'\nEpoch {epoch}/{args.epochs}')
         
         # Train with AMP
         train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device, scaler)
-        training_history['train_loss'].append(train_loss)
-        training_history['train_acc'].append(train_acc)
+        metrics_history['train_loss'].append(train_loss)
+        metrics_history['train_acc'].append(train_acc)
         print(f"Epoch {epoch} [Train] Avg Loss: {train_loss:.4f}, Avg Acc: {train_acc:.4f}")
         
         # Validate periodically
         if epoch % args.val_freq == 0:
             val_loss, val_acc = validate(model, val_loader, criterion, device)
-            training_history['val_loss'].append(val_loss)
-            training_history['val_acc'].append(val_acc)
+            metrics_history['val_loss'].append(val_loss)
+            metrics_history['val_acc'].append(val_acc)
             print(f"Epoch {epoch} [Val]   Avg Loss: {val_loss:.4f}, Avg Acc: {val_acc:.4f}")
 
             # Checkpointing and Early Stopping
-            if val_acc - best_val_acc > args.improvement_threshold:
+            if val_acc - best_val_acc > 0.005:
                 best_val_acc = val_acc
-                patience_counter = 0
-                save_path = model_dir / "best_model.pth"
+                epochs_no_improve = 0
+                save_path = specific_output_dir / "best_model.pth"
                 torch.save(model.state_dict(), save_path)
                 print(f"New best validation accuracy: {best_val_acc:.4f}. Saved model to {save_path}")
             else:
-                patience_counter += 1
-                print(f"Patience: {patience_counter}/{args.patience}")
-                if patience_counter >= args.patience:
+                epochs_no_improve += 1
+                print(f"Patience: {epochs_no_improve}/{args.patience}")
+                if epochs_no_improve >= args.patience:
                     print(f"Early stopping triggered at epoch {epoch}.")
                     break
         # End validation block
@@ -396,7 +382,7 @@ def main():
     print("\nTraining finished.")
     
     # Load best model for testing
-    best_model_path = model_dir / "best_model.pth"
+    best_model_path = specific_output_dir / "best_model.pth"
     if best_model_path.exists():
         print(f"Loading best model from {best_model_path}")
         model.load_state_dict(torch.load(best_model_path))
@@ -413,10 +399,10 @@ def main():
         'best_val_acc': best_val_acc,
         'test_acc': test_acc,
         'test_loss': test_loss,
-        'training_history': training_history,
+        'training_history': metrics_history,
         'args': vars(args)
     }
-    metrics_path = model_dir / "metrics.json"
+    metrics_path = specific_output_dir / "metrics.json"
     try:
         with open(metrics_path, 'w') as f:
             json.dump(metrics, f, indent=2)
