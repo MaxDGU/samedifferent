@@ -10,6 +10,7 @@
 #SBATCH --account=nam
 #SBATCH --output=slurm_logs/naturalistic/meta_train_%A_%a.out # Path relative to submission dir
 #SBATCH --error=slurm_logs/naturalistic/meta_train_%A_%a.err  # Path relative to submission dir
+#SBATCH --array=0-14 # 15 jobs total
 
 # --- User Configuration ---
 # Ensure NETID is set if used, though paths are now more explicit
@@ -64,7 +65,6 @@ NUM_ARCHS=${#ARCHITECTURES[@]}
 NUM_SEEDS=${#SEEDS[@]}
 
 TOTAL_JOBS=$((NUM_ARCHS * NUM_SEEDS))
-#SBATCH --array=0-$((TOTAL_JOBS - 1))%10 # Limit concurrent jobs to 10
 
 # Calculate architecture and seed for the current Slurm array task ID
 ARCH_INDEX=$((SLURM_ARRAY_TASK_ID / NUM_SEEDS))
