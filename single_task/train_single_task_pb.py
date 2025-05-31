@@ -299,7 +299,8 @@ def main():
 
     args = parser.parse_args()
 
-    # print(f"Using device: {device.type}") # This line can stay or be after args if preferred, device is now defined
+    print(f"Using device: {device.type}") # This is fine now
+
     # Ensure output directory exists
     # Save under task_name/architecture/seed_X
     specific_output_dir = Path(args.output_dir) / args.task / args.architecture / f"seed_{args.seed}"
@@ -320,14 +321,15 @@ def main():
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
     # Initialize model, criterion, optimizer
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # REMOVE/COMMENT THIS
+    # Original device assignment here should be commented out/removed if it was ever here
+    # # device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # ENSURE THIS IS GONE OR COMMENTED
     
     if args.architecture == 'conv2':
-        model = Conv2CNN(num_classes=2).to(device) # PB is binary same/different
+        model = Conv2CNN().to(device) # REMOVED num_classes
     elif args.architecture == 'conv4':
-        model = Conv4CNN(num_classes=2).to(device)
+        model = Conv4CNN().to(device) # REMOVED num_classes
     elif args.architecture == 'conv6':
-        model = Conv6CNN(num_classes=2).to(device)
+        model = Conv6CNN().to(device) # REMOVED num_classes
     else:
         raise ValueError(f"Unsupported architecture: {args.architecture}")
     print(f"Model {args.architecture} initialized.")
@@ -337,9 +339,9 @@ def main():
     torch.save(model.state_dict(), initial_model_path)
     print(f"Saved initial model weights to {initial_model_path}")
     
-    criterion = nn.BCEWithLogitsLoss() # Suitable for binary classification with raw logits
+    criterion = nn.BCEWithLogitsLoss() 
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    scaler = torch.amp.GradScaler(device_type=device.type, enabled=(device.type == 'cuda')) # MODIFIED AMP scaler
+    scaler = torch.amp.GradScaler(enabled=(device.type == 'cuda')) # CORRECTED GradScaler
 
     best_val_acc = 0.0
     epochs_no_improve = 0
