@@ -193,6 +193,8 @@ def parse_args():
                         help='Device to use (cuda or cpu)')
     parser.add_argument('--log_interval', type=int, default=50, help='Log training status every N episodes')
     parser.add_argument('--val_interval', type=int, default=1, help='Run validation every N epochs')
+    parser.add_argument('--max_val_episodes', type=int, default=None,
+                        help='Maximum number of episodes to use for validation. Default: all episodes in val set.')
     parser.add_argument('--checkpoint_interval', type=int, default=10, help='Save checkpoint every N epochs')
     parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping')
     parser.add_argument('--min_delta', type=float, default=0.001, help='Minimum improvement for early stopping')
@@ -449,10 +451,20 @@ def main():
             meta_val_loss = 0.0
             meta_val_acc = 0.0
             val_episodes = 0
-            pbar_val = tqdm(val_loader, desc=f"Epoch {epoch}/{args.epochs} [Val]")
+
+            # Determine the number of validation episodes to run
+            num_val_episodes_to_run = len(val_loader)
+            if args.max_val_episodes is not None and args.max_val_episodes > 0:
+                num_val_episodes_to_run = min(len(val_loader), args.max_val_episodes)
+                print(f"Running validation on a subset of {num_val_episodes_to_run} episodes (out of {len(val_loader)} total).")
+
+            pbar_val = tqdm(val_loader, total=num_val_episodes_to_run, desc=f"Epoch {epoch}/{args.epochs} [Val]")
             
             with torch.no_grad():
-                for batch in pbar_val:
+                for i, batch in enumerate(pbar_val):
+                    if i >= num_val_episodes_to_run:
+                        break # Stop after processing the desired number of validation episodes
+
                     task_batch = [d.squeeze(0) for d in batch]
                     
                     # Using Automatic Mixed Precision (optional for eval)
