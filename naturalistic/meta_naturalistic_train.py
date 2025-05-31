@@ -185,6 +185,7 @@ def parse_args():
     parser.add_argument('--inner_steps', type=int, default=5, help='Number of adaptation steps in inner loop (from reference script)')
     parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the meta-optimizer (AdamW). Default: 0.0 (no decay)')
     parser.add_argument('--grad_clip_norm', type=float, default=1.0, help='Max norm for gradient clipping in the outer loop. Default: 1.0')
+    parser.add_argument('--first_order', action='store_true', help='Use first-order MAML instead of second-order.')
 
     # Training Settings
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
@@ -328,7 +329,7 @@ def main():
     maml = l2l.algorithms.MAML(
         model,
         lr=args.inner_lr,
-        first_order=False, # Use second-order updates like reference
+        first_order=args.first_order, # Use first_order flag from args
         allow_unused=True, # Allow unused parameters if model has them
         allow_nograd=True  # Allow no grad for params not used in inner loop
     )
