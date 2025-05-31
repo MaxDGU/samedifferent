@@ -350,7 +350,7 @@ def main():
     
     criterion = nn.BCEWithLogitsLoss() # Suitable for binary classification with raw logits
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    scaler = torch.amp.GradScaler(device_type=device.type, enabled=(device.type == 'cuda')) # MODIFIED AMP scaler
+    scaler = torch.amp.GradScaler(enabled=(device.type == 'cuda')) # AMP scaler
 
     best_val_acc = 0.0
     epochs_no_improve = 0
