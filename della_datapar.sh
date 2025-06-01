@@ -41,7 +41,7 @@ SINGLETASK_VAL_FREQ=5
 MAML_TRAIN_SCRIPT_PATH="${CODE_ROOT_DIR}/all_tasks/experiment_all_tasks_fomaml.py" 
 MAML_NUM_EPOCHS=50 
 MAML_META_BATCH_SIZE=16          
-MAML_ADAPTATION_STEPS=1        
+MAML_ADAPTATION_STEPS=5        # Changed from 1 to 5
 MAML_NUM_ADAPTATION_SAMPLES=32 
 MAML_LR=0.001
 
@@ -116,11 +116,13 @@ ${PYTHON_EXEC} ${MAML_TRAIN_SCRIPT_PATH} \
     --meta_batch_size "${MAML_META_BATCH_SIZE}" \
     --inner_lr "${MAML_LR}" \
     --outer_lr 0.0001 \
+    --adaptation_steps "${MAML_ADAPTATION_STEPS}" \
+    --adaptation_steps_test 10 \
     --first_order \
     --output_base_dir "${MAML_RESULTS_ROOT}" \
     --data_dir "${HDF5_DATA_DIR}"
 
-MAML_ACTUAL_EXP_DIR=$(find "${MAML_RESULTS_ROOT}" -type d -name "exp_all_tasks_fomaml_${ARCH}_seed${SEED_VAL}_*" -print -quit)
+MAML_ACTUAL_EXP_DIR=$(find "${MAML_RESULTS_ROOT}" -type d -name "exp_all_tasks_fomaml_${ARCH}_seed${SEED_VAL}_*" -print0 | xargs -0 ls -td | head -n 1)
 
 if [ -z "${MAML_ACTUAL_EXP_DIR}" ]; then
     echo "ERROR: Could not find MAML experiment directory in ${MAML_RESULTS_ROOT}"

@@ -21,23 +21,23 @@ class SameDifferentCNN(nn.Module):
         
         # First layer: 6x6 filters with 18 filters
         self.conv1 = nn.Conv2d(3, 18, kernel_size=6, stride=1, padding=2)
-        self.bn1 = nn.BatchNorm2d(18, track_running_stats=False)
+        self.bn1 = nn.BatchNorm2d(18)
         
         # Subsequent layers: 2x2 filters with doubling filter counts
         self.conv2 = nn.Conv2d(18, 36, kernel_size=2, stride=1, padding=1)
-        self.bn2 = nn.BatchNorm2d(36, track_running_stats=False)
+        self.bn2 = nn.BatchNorm2d(36)
         
         self.conv3 = nn.Conv2d(36, 72, kernel_size=2, stride=1, padding=1)
-        self.bn3 = nn.BatchNorm2d(72, track_running_stats=False)
+        self.bn3 = nn.BatchNorm2d(72)
         
         self.conv4 = nn.Conv2d(72, 144, kernel_size=2, stride=1, padding=1)
-        self.bn4 = nn.BatchNorm2d(144, track_running_stats=False)
+        self.bn4 = nn.BatchNorm2d(144)
         
         self.conv5 = nn.Conv2d(144, 288, kernel_size=2, stride=1, padding=1)
-        self.bn5 = nn.BatchNorm2d(288, track_running_stats=False)
+        self.bn5 = nn.BatchNorm2d(288)
         
         self.conv6 = nn.Conv2d(288, 576, kernel_size=2, stride=1, padding=1)
-        self.bn6 = nn.BatchNorm2d(576, track_running_stats=False)
+        self.bn6 = nn.BatchNorm2d(576)
         
         # Pooling and dropout
         self.pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
