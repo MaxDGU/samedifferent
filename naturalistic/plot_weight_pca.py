@@ -61,63 +61,77 @@ def parse_args():
     return parser.parse_args()
 
 def get_initial_flattened_weights(model_class, seed, num_input_channels=1, num_classes=2):
+    print(f"    Attempting to generate initial weights for model class {model_class.__name__} with seed {seed}")
     torch.manual_seed(seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed) # For consistent GPU initialization if model uses it
-    np.random.seed(seed) # For any numpy-based randomness in model initialization
-
-    model = model_class(channels_in=num_input_channels, num_classes=num_classes)
-    model.eval() 
-    
-    with torch.no_grad(): 
-        flat_weights = torch.cat([p.cpu().flatten() for p in model.state_dict().values()])
-    return flat_weights.numpy()
+        torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    try:
+        model = model_class(channels_in=num_input_channels, num_classes=num_classes)
+        model.eval()
+        with torch.no_grad():
+            flat_weights = torch.cat([p.cpu().flatten() for p in model.state_dict().values()])
+        print(f"    Successfully generated initial weights on the fly.")
+        return flat_weights.numpy()
+    except Exception as e:
+        print(f"    ERROR during on-the-fly initial weight generation for {model_class.__name__}, seed {seed}: {e}")
+        raise # Re-raise the exception to be caught by the main loop
 
 def load_and_flatten_weights(model_path):
-    # Revert to weights_only=False as checkpoints contain argparse.Namespace
-    checkpoint = torch.load(model_path, map_location='cpu', weights_only=False) 
-    
+    checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
     state_dict = None
     if isinstance(checkpoint, dict):
         if 'model_state_dict' in checkpoint:
             state_dict = checkpoint['model_state_dict']
-        elif 'state_dict' in checkpoint: 
+        elif 'state_dict' in checkpoint:
             state_dict = checkpoint['state_dict']
-        elif 'model' in checkpoint and hasattr(checkpoint['model'], 'state_dict'): # MAML saves model object
-             model_loaded = checkpoint['model']
-             # If model was saved with DataParallel, keys might have 'module.' prefix
-             # Creating a new OrderedDict ensures we handle this potential prefix correctly,
-             # though if your training scripts already saved model.module.state_dict(), it's not strictly needed.
-             new_state_dict = OrderedDict()
-             for k, v in model_loaded.state_dict().items():
-                 name = k[7:] if k.startswith('module.') else k 
-                 new_state_dict[name] = v
-             state_dict = new_state_dict
-        elif all(isinstance(v, torch.Tensor) for v in checkpoint.values()): 
-            # If it's a dict of tensors, assume it IS the state_dict
-            # This is less likely for your MAML/Vanilla checkpoints but good to have
+        elif 'model' in checkpoint and hasattr(checkpoint['model'], 'state_dict'):
+            model_loaded = checkpoint['model']
+            new_state_dict = OrderedDict()
+            for k, v in model_loaded.state_dict().items():
+                name = k[7:] if k.startswith('module.') else k
+                new_state_dict[name] = v
+            state_dict = new_state_dict
+        elif all(isinstance(v, (torch.Tensor, torch.nn.Parameter)) for v in checkpoint.values()): 
             state_dict = checkpoint
         else:
-            # Fallback: if the checkpoint is a dict but no known keys, assume it is the state_dict itself.
-            # This might happen if torch.save(model.state_dict(), path) was used directly
-            # and the state_dict itself was a plain dict (not OrderedDict).
-            # Check if all values are tensors to be safer.
-            if all(isinstance(v, (torch.Tensor, torch.nn.Parameter)) for v in checkpoint.values()):
-                 state_dict = checkpoint
+            # Check if it's the args Namespace issue for MAML initial models
+            if 'args' in checkpoint and isinstance(checkpoint['args'], argparse.Namespace) and 'model_state_dict' not in checkpoint and 'state_dict' not in checkpoint:
+                 # This case might be an older MAML initial save that saved the entire training script's checkpoint
+                 # We need to find the actual model weights within this structure if possible,
+                 # or this format is not directly usable for just weights.
+                 # For now, assume this is not the primary path for initial_model.pth if it *only* contains weights.
+                 # If initial_model.pth *does* follow this complex structure, this logic needs enhancement.
+                 print(f"    WARNING: Checkpoint at {model_path} contains 'args' but no clear state_dict. Trying to find nested model data.")
+                 # Add specific logic here if you know how the model is nested in this case.
+                 # For example, if it was checkpoint['learner'].module.state_dict()
+                 if hasattr(checkpoint.get('learner'), 'module') and hasattr(checkpoint['learner'].module, 'state_dict'):
+                     state_dict = checkpoint['learner'].module.state_dict()
+                 elif hasattr(checkpoint.get('learner'), 'state_dict'):
+                     state_dict = checkpoint['learner'].state_dict()
+                 else:
+                     raise ValueError(f"Checkpoint at {model_path} is a complex dict with 'args' and no recognized model state_dict path.")
             else:
                 raise ValueError(f"Checkpoint at {model_path} is a dict but not a recognized state_dict format or simple model wrapper.")
     elif isinstance(checkpoint, OrderedDict) and all(isinstance(v, (torch.Tensor, torch.nn.Parameter)) for v in checkpoint.values()):
-        # Directly saved state_dict (often an OrderedDict)
         state_dict = checkpoint
-    elif hasattr(checkpoint, 'state_dict'): # If the checkpoint is the model object itself
-        # This can happen if torch.save(model, path) was used
+    elif hasattr(checkpoint, 'state_dict'): 
         new_state_dict = OrderedDict()
         for k, v in checkpoint.state_dict().items():
             name = k[7:] if k.startswith('module.') else k
             new_state_dict[name] = v
         state_dict = new_state_dict
     else:
-        raise ValueError(f"Could not extract state_dict from checkpoint at {model_path}. Loaded object type: {type(checkpoint)}")
+        # This case could be a raw state_dict saved directly that isn't an OrderedDict
+        # Let's assume if it's not a dict and not an OrderedDict, but has values that are tensors, it *is* the state_dict
+        try:
+            if all(isinstance(v, (torch.Tensor, torch.nn.Parameter)) for v in checkpoint.values()):
+                 state_dict = checkpoint
+            else:
+                 raise ValueError(f"Could not extract state_dict from checkpoint at {model_path}. Loaded object type: {type(checkpoint)} and values are not all tensors.")
+        except AttributeError: # if checkpoint doesn't have .values()
+             raise ValueError(f"Could not extract state_dict from checkpoint at {model_path}. Loaded object type: {type(checkpoint)} is not a dict-like structure.")
+
 
     if state_dict is None:
         raise ValueError(f"State_dict is None after attempting to load from {model_path}")
@@ -157,32 +171,40 @@ def main():
 
         # --- Collect Initial MAML Weights ---
         for seed in args.seeds:
-            print(f"  Getting initial MAML weights for seed {seed}...")
-            try:
-                weights = get_initial_flattened_weights(model_class, seed, args.num_input_channels, args.num_classes)
-                all_weights_for_pca_list.append(weights)
-                pca_point_metadata.append({'method': 'MAML', 'state': 'Initial', 'seed': seed, 'arch': arch_name})
-                if ('MAML', seed) not in trajectory_points: trajectory_points[('MAML', seed)] = {}
-                # Temporarily store raw weights; will be replaced by PCA coords later
-                trajectory_points[('MAML', seed)]['initial_raw'] = weights 
-            except Exception as e:
-                print(f"    ERROR generating initial MAML weights for seed {seed}, arch {arch_name}: {e}")
+            print(f"  Loading initial MAML weights for arch {arch_name}, seed {seed}...")
+            initial_maml_path = Path(args.maml_log_dir_base) / arch_name / f"seed_{seed}" / arch_name / f"seed_{seed}" / "initial_model.pth"
+            if initial_maml_path.exists():
+                try:
+                    weights = load_and_flatten_weights(initial_maml_path)
+                    all_weights_for_pca_list.append(weights)
+                    pca_point_metadata.append({'method': 'MAML', 'state': 'Initial', 'seed': seed, 'arch': arch_name})
+                    if ('MAML', seed) not in trajectory_points: trajectory_points[('MAML', seed)] = {}
+                    trajectory_points[('MAML', seed)]['initial_raw'] = weights
+                    print(f"    Successfully loaded initial MAML weights from {initial_maml_path}")
+                except Exception as e:
+                    print(f"    ERROR loading initial MAML weights from {initial_maml_path}: {e}")
+            else:
+                print(f"    WARNING: Initial MAML model not found at {initial_maml_path}. Will attempt to generate on-the-fly if needed (not primary path).")
+                # Optionally, try to generate on the fly if file not found - or decide to skip
+                # For now, we will rely on loaded initial MAML weights for Vanilla initial state.
+                # If MAML initial is missing, Vanilla initial for that seed will also be missing.
 
         # --- Collect Final MAML Weights ---
         for seed in args.seeds:
-            print(f"  Loading final MAML weights for seed {seed}...")
-            maml_model_path = Path(args.maml_log_dir_base) / arch_name / f"seed_{seed}" / arch_name / f"seed_{seed}" / f"{arch_name}_best.pth"
-            if maml_model_path.exists():
+            print(f"  Loading final MAML weights for arch {arch_name}, seed {seed}...")
+            final_maml_path = Path(args.maml_log_dir_base) / arch_name / f"seed_{seed}" / arch_name / f"seed_{seed}" / f"{arch_name}_best.pth"
+            if final_maml_path.exists():
                 try:
-                    weights = load_and_flatten_weights(maml_model_path)
+                    weights = load_and_flatten_weights(final_maml_path)
                     all_weights_for_pca_list.append(weights)
                     pca_point_metadata.append({'method': 'MAML', 'state': 'Final', 'seed': seed, 'arch': arch_name})
                     if ('MAML', seed) not in trajectory_points: trajectory_points[('MAML', seed)] = {}
                     trajectory_points[('MAML', seed)]['final_raw'] = weights
+                    print(f"    Successfully loaded final MAML weights from {final_maml_path}")
                 except Exception as e:
-                    print(f"    ERROR loading final MAML weights from {maml_model_path}: {e}")
+                    print(f"    ERROR loading final MAML weights from {final_maml_path}: {e}")
             else:
-                print(f"    WARNING: MAML model not found at {maml_model_path}")
+                print(f"    WARNING: Final MAML model not found at {final_maml_path}")
         
         # --- Collect Initial Vanilla Weights ---
         for seed in args.seeds:
