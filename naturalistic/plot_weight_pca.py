@@ -34,7 +34,7 @@ except ImportError as e:
         def __init__(self, *args, **kwargs): pass
         def eval(self): pass
         def state_dict(self): return {}
-    MODEL_CLASSES = {'conv2lr': DummyModel, 'conv4lr': DummyModel, 'conv6lr': DummyModel}
+    MODEL_CLASSES = {'conv2lr': conv2, 'conv4lr': conv4, 'conv6lr': conv6}
     # It's better to exit if models can't be loaded, as the script is useless.
     # However, for tool execution flow, this might be problematic.
     # For now, it will try to run but likely fail at model instantiation.
