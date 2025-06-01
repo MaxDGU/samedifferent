@@ -23,16 +23,16 @@ try:
     project_root = script_dir.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    # Use conv2, conv4, conv6 as per user confirmation
-    from baselines.models import conv2, conv4, conv6
+    # Correctly import the aliased class names from baselines.models
+    from baselines.models import Conv2CNN, Conv4CNN, Conv6CNN 
     MODEL_CLASSES = {
-        'conv2lr': conv2,
-        'conv4lr': conv4,
-        'conv6lr': conv6,
+        'conv2lr': Conv2CNN,
+        'conv4lr': Conv4CNN,
+        'conv6lr': Conv6CNN,
     }
 except ImportError as e:
     print(f"CRITICAL ERROR: Could not import model classes from 'baselines.models': {e}", file=sys.stderr)
-    print("Ensure 'baselines' directory is at the project root and contains model definitions (conv2, conv4, conv6).", file=sys.stderr)
+    print("Ensure 'baselines.models/__init__.py' exports Conv2CNN, Conv4CNN, Conv6CNN.", file=sys.stderr)
     try:
         print(f"Project root determined as: {project_root}", file=sys.stderr)
     except NameError:
@@ -146,189 +146,163 @@ def main():
     output_path.mkdir(parents=True, exist_ok=True)
 
     # Check if MODEL_CLASSES was populated correctly (i.e., no DummyModel instances)
-    if any(mc == DummyModel for mc in MODEL_CLASSES.values()): # Check class itself
-        print("CRITICAL ERROR: Model classes were not imported correctly. Aborting.", file=sys.stderr)
-        print("Please check the import logic for 'baselines.models' and ensure the path is correct.", file=sys.stderr)
-        return 1 # Indicate an error
+    if any(isinstance(MODEL_CLASSES.get(arch_name), type) and issubclass(MODEL_CLASSES.get(arch_name), DummyModel) for arch_name in args.architectures):
+        print("CRITICAL ERROR: Model classes were not imported correctly (DummyModel found). Aborting.", file=sys.stderr)
+        return 1
+
+    loaded_initial_maml_weights = {}
 
     for arch_name in args.architectures:
-        if arch_name not in MODEL_CLASSES:
-            print(f"WARNING: Architecture '{arch_name}' not found in MODEL_CLASSES. Skipping.")
-            continue
-        
         print(f"\nProcessing architecture: {arch_name.upper()}")
-        model_class = MODEL_CLASSES[arch_name]
-        if model_class == DummyModel: # Double check, if the earlier check passed but somehow it's still Dummy
-             print(f"CRITICAL ERROR: Model class for {arch_name} is a DummyModel. Cannot proceed. Aborting.", file=sys.stderr)
+        model_class = MODEL_CLASSES.get(arch_name)
+        if model_class == DummyModel or model_class is None:
+             print(f"CRITICAL ERROR: Model class for {arch_name} is a DummyModel or missing. Cannot proceed. Aborting.", file=sys.stderr)
              return 1
 
-        all_weights_for_pca_list = []
-        # Stores dicts: {'method': str, 'state': str, 'seed': int, 'arch': str}
-        pca_point_metadata = [] 
-        # Store initial and final PCA points to draw lines later
-        # Structure: {(method, seed): {'initial': (pc1, pc2), 'final': (pc1, pc2)}}
-        trajectory_points = {} 
+        current_arch_weights_list = []
+        current_arch_pca_metadata = []
+        current_arch_trajectory_points = {}
 
-        # --- Collect Initial MAML Weights ---
         for seed in args.seeds:
             print(f"  Loading initial MAML weights for arch {arch_name}, seed {seed}...")
             initial_maml_path = Path(args.maml_log_dir_base) / arch_name / f"seed_{seed}" / arch_name / f"seed_{seed}" / "initial_model.pth"
             if initial_maml_path.exists():
                 try:
                     weights = load_and_flatten_weights(initial_maml_path)
-                    all_weights_for_pca_list.append(weights)
-                    pca_point_metadata.append({'method': 'MAML', 'state': 'Initial', 'seed': seed, 'arch': arch_name})
-                    if ('MAML', seed) not in trajectory_points: trajectory_points[('MAML', seed)] = {}
-                    trajectory_points[('MAML', seed)]['initial_raw'] = weights
+                    current_arch_weights_list.append(weights)
+                    current_arch_pca_metadata.append({'method': 'MAML', 'state': 'Initial', 'seed': seed, 'arch': arch_name})
+                    loaded_initial_maml_weights[(arch_name, seed)] = weights
+                    if ('MAML', seed) not in current_arch_trajectory_points: current_arch_trajectory_points[('MAML', seed)] = {}
+                    current_arch_trajectory_points[('MAML', seed)]['initial_raw'] = weights
                     print(f"    Successfully loaded initial MAML weights from {initial_maml_path}")
                 except Exception as e:
                     print(f"    ERROR loading initial MAML weights from {initial_maml_path}: {e}")
             else:
-                print(f"    WARNING: Initial MAML model not found at {initial_maml_path}. Will attempt to generate on-the-fly if needed (not primary path).")
-                # Optionally, try to generate on the fly if file not found - or decide to skip
-                # For now, we will rely on loaded initial MAML weights for Vanilla initial state.
-                # If MAML initial is missing, Vanilla initial for that seed will also be missing.
+                print(f"    WARNING: Initial MAML model not found at {initial_maml_path}.")
 
-        # --- Collect Final MAML Weights ---
         for seed in args.seeds:
             print(f"  Loading final MAML weights for arch {arch_name}, seed {seed}...")
             final_maml_path = Path(args.maml_log_dir_base) / arch_name / f"seed_{seed}" / arch_name / f"seed_{seed}" / f"{arch_name}_best.pth"
             if final_maml_path.exists():
                 try:
                     weights = load_and_flatten_weights(final_maml_path)
-                    all_weights_for_pca_list.append(weights)
-                    pca_point_metadata.append({'method': 'MAML', 'state': 'Final', 'seed': seed, 'arch': arch_name})
-                    if ('MAML', seed) not in trajectory_points: trajectory_points[('MAML', seed)] = {}
-                    trajectory_points[('MAML', seed)]['final_raw'] = weights
+                    current_arch_weights_list.append(weights)
+                    current_arch_pca_metadata.append({'method': 'MAML', 'state': 'Final', 'seed': seed, 'arch': arch_name})
+                    if ('MAML', seed) not in current_arch_trajectory_points: current_arch_trajectory_points[('MAML', seed)] = {}
+                    current_arch_trajectory_points[('MAML', seed)]['final_raw'] = weights
                     print(f"    Successfully loaded final MAML weights from {final_maml_path}")
                 except Exception as e:
                     print(f"    ERROR loading final MAML weights from {final_maml_path}: {e}")
             else:
                 print(f"    WARNING: Final MAML model not found at {final_maml_path}")
         
-        # --- Collect Initial Vanilla Weights ---
         for seed in args.seeds:
-            print(f"  Getting initial Vanilla SGD weights for seed {seed}...")
-            try:
-                weights = get_initial_flattened_weights(model_class, seed, args.num_input_channels, args.num_classes)
-                all_weights_for_pca_list.append(weights)
-                pca_point_metadata.append({'method': 'Vanilla', 'state': 'Initial', 'seed': seed, 'arch': arch_name})
-                if ('Vanilla', seed) not in trajectory_points: trajectory_points[('Vanilla', seed)] = {}
-                trajectory_points[('Vanilla', seed)]['initial_raw'] = weights
-            except Exception as e:
-                print(f"    ERROR generating initial Vanilla weights for seed {seed}, arch {arch_name}: {e}")
-
-        # --- Collect Final Vanilla Weights ---
-        for seed in args.seeds:
-            print(f"  Loading final Vanilla SGD weights for seed {seed}...")
-            vanilla_model_path = Path(args.vanilla_log_dir_base) / arch_name / f"seed_{seed}" / "best_model.pt"
-            if vanilla_model_path.exists():
-                try:
-                    weights = load_and_flatten_weights(vanilla_model_path)
-                    all_weights_for_pca_list.append(weights)
-                    pca_point_metadata.append({'method': 'Vanilla', 'state': 'Final', 'seed': seed, 'arch': arch_name})
-                    if ('Vanilla', seed) not in trajectory_points: trajectory_points[('Vanilla', seed)] = {}
-                    trajectory_points[('Vanilla', seed)]['final_raw'] = weights
-                except Exception as e:
-                    print(f"    ERROR loading final Vanilla weights from {vanilla_model_path}: {e}")
+            print(f"  Assigning initial Vanilla SGD weights for arch {arch_name}, seed {seed} (from MAML initial)...")
+            if (arch_name, seed) in loaded_initial_maml_weights:
+                weights = loaded_initial_maml_weights[(arch_name, seed)]
+                current_arch_weights_list.append(weights)
+                current_arch_pca_metadata.append({'method': 'Vanilla', 'state': 'Initial', 'seed': seed, 'arch': arch_name})
+                if ('Vanilla', seed) not in current_arch_trajectory_points: current_arch_trajectory_points[('Vanilla', seed)] = {}
+                current_arch_trajectory_points[('Vanilla', seed)]['initial_raw'] = weights
+                print(f"    Successfully assigned initial Vanilla weights (from MAML seed {seed}).")
             else:
-                print(f"    WARNING: Vanilla SGD model not found at {vanilla_model_path}")
+                print(f"    WARNING: Initial MAML weights for arch {arch_name}, seed {seed} were not loaded. Cannot assign initial Vanilla weights.")
 
-        if not all_weights_for_pca_list:
+        for seed in args.seeds:
+            print(f"  Loading final Vanilla SGD weights for arch {arch_name}, seed {seed}...")
+            final_vanilla_path = Path(args.vanilla_log_dir_base) / arch_name / f"seed_{seed}" / "best_model.pt"
+            if final_vanilla_path.exists():
+                try:
+                    weights = load_and_flatten_weights(final_vanilla_path)
+                    current_arch_weights_list.append(weights)
+                    current_arch_pca_metadata.append({'method': 'Vanilla', 'state': 'Final', 'seed': seed, 'arch': arch_name})
+                    if ('Vanilla', seed) not in current_arch_trajectory_points: current_arch_trajectory_points[('Vanilla', seed)] = {}
+                    current_arch_trajectory_points[('Vanilla', seed)]['final_raw'] = weights
+                    print(f"    Successfully loaded final Vanilla weights from {final_vanilla_path}")
+                except Exception as e:
+                    print(f"    ERROR loading final Vanilla weights from {final_vanilla_path}: {e}")
+            else:
+                print(f"    WARNING: Final Vanilla SGD model not found at {final_vanilla_path}")
+
+        if not current_arch_weights_list:
             print(f"  No weights collected for architecture {arch_name}. Skipping PCA plot.")
             continue
 
-        weights_matrix = np.array(all_weights_for_pca_list)
+        try:
+            weights_matrix = np.array(current_arch_weights_list)
+            if weights_matrix.size == 0 and len(current_arch_weights_list) > 0:
+                 print(f"  WARNING: weights_matrix is empty for {arch_name} even though list was not. This indicates all appends failed or list contained non-convertible types.")
+                 continue
+        except ValueError as e:
+            print(f"  ERROR creating numpy array from weights list for {arch_name}: {e}")
+            # Debugging: print types and shapes if ValueError occurs due to inhomogeneous list
+            if any(not isinstance(item, np.ndarray) for item in current_arch_weights_list):
+                print("    Detected non-NumPy array items in current_arch_weights_list:")
+                for i, item in enumerate(current_arch_weights_list):
+                    print(f"      Item {i} type: {type(item)}")
+            else: # All are ndarrays, but shapes might differ
+                print("    All items are NumPy arrays, checking shapes for inhomogeneity:")
+                first_shape = current_arch_weights_list[0].shape if current_arch_weights_list else None
+                for i, item in enumerate(current_arch_weights_list):
+                    if item.shape != first_shape:
+                        print(f"      Item {i} shape: {item.shape} (DIFFERENT from first shape {first_shape})")
+                    # else: print(f"      Item {i} shape: {item.shape}") # optionally print all shapes
+            continue
         
-        if weights_matrix.shape[0] < 2: # PCA needs at least 2 samples
+        if weights_matrix.shape[0] < 2: 
             print(f"  Not enough weight samples ({weights_matrix.shape[0]}) for PCA for architecture {arch_name} (need at least 2). Skipping.")
             continue
-        if weights_matrix.ndim != 2 or weights_matrix.shape[1] == 0:
+        if weights_matrix.ndim != 2 or (weights_matrix.ndim == 2 and weights_matrix.shape[1] == 0):
              print(f"  Weight matrix for {arch_name} is not suitable for PCA (shape: {weights_matrix.shape}). Skipping.")
              continue
 
-        print(f"  Performing PCA on {weights_matrix.shape[0]} weight vectors of dimension {weights_matrix.shape[1]}...")
-        pca = PCA(n_components=2, random_state=42) # Ensure reproducibility of PCA
+        print(f"  Performing PCA on {weights_matrix.shape[0]} weight vectors of dimension {weights_matrix.shape[1]} for {arch_name}...")
+        pca = PCA(n_components=2, random_state=42)
         try:
             transformed_weights = pca.fit_transform(weights_matrix)
-        except ValueError as e: # Handles cases like n_samples < n_components
+        except ValueError as e:
             print(f"  PCA failed for {arch_name}: {e}. Weight matrix shape: {weights_matrix.shape}")
             continue
         
-        # Populate trajectory_points with PCA coordinates
         current_pca_idx = 0
-        for meta_idx, meta in enumerate(pca_point_metadata):
-            method_seed_key = (meta['method'], meta['seed'])
-            state_key_pca = 'initial' if meta['state'] == 'Initial' else 'final' # To store PCA coords
-            
-            # Check if this point corresponds to one we stored raw weights for
-            # This check is to ensure we only try to get PCA for points that were actually loaded
-            # And that we don't go out of bounds if some raw weights were missing
-            if method_seed_key in trajectory_points and f'{state_key_pca}_raw' in trajectory_points[method_seed_key]:
-                if current_pca_idx < len(transformed_weights):
-                    trajectory_points[method_seed_key][state_key_pca] = (transformed_weights[current_pca_idx, 0], transformed_weights[current_pca_idx, 1])
-                    current_pca_idx += 1
-                else:
-                    print(f"    WARNING: Ran out of transformed_weights for {method_seed_key}, {state_key_pca}. Skipping for trajectory line.")
-            
-        # --- Plotting ---
-        plt.figure(figsize=(14, 10)) # Slightly wider for lines
-        colors = {'MAML': '#1f77b4', 'Vanilla': '#ff7f0e'} 
-        markers = {'Initial': 'o', 'Final': 'x'}
-        line_styles = {'MAML': ':', 'Vanilla': '--'} # Different line styles for MAML and Vanilla trajectories
-        
-        plotted_legend_labels = {} 
-
-        # First, plot all scatter points
-        # Iterate through pca_point_metadata to ensure correct association with transformed_weights
-        scatter_idx = 0
-        for meta in pca_point_metadata:
-            method = meta['method']
-            state = meta['state']
-            
-            # Check if this point was successfully transformed by PCA
-            # (This implies it was successfully loaded initially)
+        for meta_idx, meta in enumerate(current_arch_pca_metadata):
             method_seed_key = (meta['method'], meta['seed'])
             state_key_pca = 'initial' if meta['state'] == 'Initial' else 'final'
+            if method_seed_key in current_arch_trajectory_points and f'{state_key_pca}_raw' in current_arch_trajectory_points[method_seed_key]:
+                if current_pca_idx < len(transformed_weights):
+                    current_arch_trajectory_points[method_seed_key][state_key_pca] = (transformed_weights[current_pca_idx, 0], transformed_weights[current_pca_idx, 1])
+                    current_pca_idx += 1
+                else:
+                    print(f"    WARNING: Ran out of transformed_weights for {method_seed_key}, {state_key_pca} (arch {arch_name}). Skipping for trajectory line.")
             
-            if method_seed_key in trajectory_points and state_key_pca in trajectory_points[method_seed_key]:
-                pc1, pc2 = trajectory_points[method_seed_key][state_key_pca]
-                label_key = f"{method} {state}"
-                
-                plt.scatter(pc1, pc2, 
-                            color=colors[method], 
-                            marker=markers[state], 
-                            s=120, # marker size
-                            alpha=0.8,
-                            label=label_key if label_key not in plotted_legend_labels else None, 
-                            zorder=3) # Ensure points are above lines
-                
+        plt.figure(figsize=(14, 10))
+        colors = {'MAML': '#1f77b4', 'Vanilla': '#ff7f0e'}
+        markers = {'Initial': 'o', 'Final': 'x'}
+        line_styles = {'MAML': ':', 'Vanilla': '--'}
+        plotted_legend_labels = {}
+
+        for (method, seed), points_data in current_arch_trajectory_points.items():
+            for state, coords in points_data.items():
+                if state.endswith('_raw'): continue
+                pc1, pc2 = coords
+                label_key = f"{method} {state.capitalize()}"
+                actual_marker_state = state.capitalize()
+                plt.scatter(pc1, pc2,
+                            color=colors[method],
+                            marker=markers[actual_marker_state],
+                            s=120, alpha=0.8,
+                            label=label_key if label_key not in plotted_legend_labels else None,
+                            zorder=3)
                 if label_key not in plotted_legend_labels:
                     plotted_legend_labels[label_key] = True
-            else:
-                # This case should ideally not happen if PCA was successful and trajectory_points was populated correctly
-                # But as a fallback, try to use scatter_idx if this point did contribute to PCA
-                # This path is less robust, relying on matching order.
-                if scatter_idx < len(transformed_weights):
-                    pc1 = transformed_weights[scatter_idx, 0]
-                    pc2 = transformed_weights[scatter_idx, 1]
-                    label_key = f"{method} {state}" # May create duplicate legend items if not careful
-                    plt.scatter(pc1, pc2, color=colors[method], marker=markers[state], s=120, alpha=0.8, label=label_key if label_key not in plotted_legend_labels else None, zorder=3)
-                    if label_key not in plotted_legend_labels: plotted_legend_labels[label_key] = True
-                scatter_idx +=1 # Increment only if used
-            
 
-        # Then, draw trajectory lines
-        for (method, seed), points in trajectory_points.items():
-            if 'initial' in points and 'final' in points:
-                initial_pt = points['initial']
-                final_pt = points['final']
+        for (method, seed), points_data in current_arch_trajectory_points.items():
+            if 'initial' in points_data and 'final' in points_data:
+                initial_pt = points_data['initial']
+                final_pt = points_data['final']
                 plt.plot([initial_pt[0], final_pt[0]], [initial_pt[1], final_pt[1]],
-                         linestyle=line_styles[method],
-                         color=colors[method],
-                         alpha=0.5, 
-                         linewidth=1.5,
-                         zorder=2) # Lines behind points
+                         linestyle=line_styles[method], color=colors[method],
+                         alpha=0.5, linewidth=1.5, zorder=2)
         
         plt.title(f'PCA of Model Weights: {arch_name.upper()}', fontsize=16)
         plt.xlabel(f'Principal Component 1 (Explains {pca.explained_variance_ratio_[0]:.2%} variance)', fontsize=12)
@@ -336,29 +310,26 @@ def main():
         plt.grid(True, linestyle='--', alpha=0.6)
         
         handles, labels = plt.gca().get_legend_handles_labels()
-        if handles: 
+        if handles:
             desired_order = ["MAML Initial", "MAML Final", "Vanilla Initial", "Vanilla Final"]
             ordered_handles = []
             ordered_labels = []
             label_to_handle_map = dict(zip(labels, handles))
-
             for lbl in desired_order:
                 if lbl in label_to_handle_map:
                     ordered_labels.append(lbl)
                     ordered_handles.append(label_to_handle_map[lbl])
-            
             for lbl, hdl in label_to_handle_map.items():
                 if lbl not in ordered_labels:
                     ordered_labels.append(lbl)
                     ordered_handles.append(hdl)
-
             plt.legend(ordered_handles, ordered_labels, title="Weight Group", fontsize=10, title_fontsize=12, loc='best')
         
         plot_filename = output_path / f"pca_weights_{arch_name}.png"
-        plt.tight_layout() # Adjust plot to ensure everything fits without overlapping
+        plt.tight_layout()
         plt.savefig(plot_filename)
-        plt.close() # Close the figure to free up memory
-        print(f"  PCA plot saved to {plot_filename}")
+        plt.close()
+        print(f"  PCA plot saved to {plot_filename} for architecture {arch_name}")
 
     print("\nFinished generating PCA plots.")
     return 0
