@@ -23,6 +23,7 @@ try:
     project_root = script_dir.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
+    # Use conv2, conv4, conv6 as per user confirmation
     from baselines.models import conv2, conv4, conv6
     MODEL_CLASSES = {
         'conv2lr': conv2,
@@ -31,14 +32,12 @@ try:
     }
 except ImportError as e:
     print(f"CRITICAL ERROR: Could not import model classes from 'baselines.models': {e}", file=sys.stderr)
-    print("Ensure 'baselines' directory is at the project root and contains model definitions (conv2, etc.).", file=sys.stderr)
-    # project_root might not be defined if Path(__file__) fails, though unlikely here.
+    print("Ensure 'baselines' directory is at the project root and contains model definitions (conv2, conv4, conv6).", file=sys.stderr)
     try:
         print(f"Project root determined as: {project_root}", file=sys.stderr)
     except NameError:
         print("Project root could not be determined.", file=sys.stderr)
     print(f"Current sys.path: {sys.path}", file=sys.stderr)
-    # Now, use the globally defined DummyModel
     MODEL_CLASSES = {'conv2lr': DummyModel, 'conv4lr': DummyModel, 'conv6lr': DummyModel}
     print("Fell back to using DummyModel instances due to import error.", file=sys.stderr)
 
@@ -67,49 +66,49 @@ def get_initial_flattened_weights(model_class, seed, num_input_channels=1, num_c
         torch.cuda.manual_seed_all(seed) # For consistent GPU initialization if model uses it
     np.random.seed(seed) # For any numpy-based randomness in model initialization
 
-    # Instantiate the model (expected to be on CPU by default)
     model = model_class(channels_in=num_input_channels, num_classes=num_classes)
-    model.eval() # Set to evaluation mode (e.g., for dropout, batchnorm)
+    model.eval() 
     
-    with torch.no_grad(): # Ensure no gradients are computed
-        # Flatten the state dict values and concatenate them
+    with torch.no_grad(): 
         flat_weights = torch.cat([p.cpu().flatten() for p in model.state_dict().values()])
-    return flat_weights
+    return flat_weights.numpy()
 
 def load_and_flatten_weights(model_path):
-    # Load checkpoint to CPU to avoid issues if the script is run on a machine without GPU
-    # or with a different GPU setup than where the model was saved.
-    checkpoint = torch.load(model_path, map_location='cpu')
+    # Load with weights_only=True for security and future compatibility
+    checkpoint = torch.load(model_path, map_location='cpu', weights_only=True)
     
     state_dict = None
+    # If weights_only=True, torch.load directly returns the state_dict 
+    # if the file was saved with torch.save(model.state_dict(), ...)
+    # or it returns the model itself if saved with torch.save(model, ...)
+    # However, our previous scripts likely saved dicts like {'model_state_dict': ...}
+    # When weights_only=True, loading such a structure might require that the keys 
+    # are simple and the values are tensors. Let's assume for now it works, 
+    # or adjust if specific errors arise from weights_only=True.
+    # For a simple state_dict save, checkpoint would be the state_dict directly.
     if isinstance(checkpoint, dict):
+        # Common patterns for checkpoint dictionaries
         if 'model_state_dict' in checkpoint:
             state_dict = checkpoint['model_state_dict']
-        elif 'state_dict' in checkpoint: # Some frameworks use 'state_dict'
+        elif 'state_dict' in checkpoint:
             state_dict = checkpoint['state_dict']
+        elif all(isinstance(v, torch.Tensor) for v in checkpoint.values()):
+            # If it's a dict of tensors, assume it IS the state_dict
+            state_dict = checkpoint
         else:
-            # If it's a dict but no known keys, assume the dict itself is the state_dict
-            # This is less common for checkpoints but possible for direct state_dict saves
-            state_dict = checkpoint 
-    else:
-        # If checkpoint is not a dict, assume it's the state_dict itself
-        # (e.g., saved directly with torch.save(model.state_dict(), path))
+            # This case might be more complex with weights_only=True if it contains non-tensor data
+            raise ValueError(f"Checkpoint at {model_path} is a dict but not a recognized state_dict format for weights_only=True loading.")
+    elif isinstance(checkpoint, OrderedDict) and all(isinstance(v, torch.Tensor) for v in checkpoint.values()):
+        # Directly saved state_dict (often an OrderedDict)
         state_dict = checkpoint
+    else:
+        raise ValueError(f"Could not extract state_dict from checkpoint at {model_path}. Loaded object type: {type(checkpoint)}")
 
     if state_dict is None:
-        raise ValueError(f"Could not extract state_dict from checkpoint at {model_path}")
-
-    # The MAML and Vanilla training scripts save model.module.state_dict(),
-    # so the keys should already be clean (no 'module.' prefix).
-    # If a raw DataParallel state_dict was saved, prefix removal would be needed:
-    # new_state_dict = OrderedDict()
-    # for k, v in state_dict.items():
-    #     name = k[7:] if k.startswith('module.') else k 
-    #     new_state_dict[name] = v
-    # state_dict = new_state_dict
+        raise ValueError(f"State_dict is None after attempting to load from {model_path}")
             
     flat_weights = torch.cat([p.cpu().flatten() for p in state_dict.values()])
-    return flat_weights
+    return flat_weights.numpy() # Ensure NumPy array is returned
 
 def main():
     args = parse_args()
@@ -144,7 +143,7 @@ def main():
             print(f"  Getting initial MAML weights for seed {seed}...")
             try:
                 weights = get_initial_flattened_weights(model_class, seed, args.num_input_channels, args.num_classes)
-                all_weights_for_pca_list.append(weights.numpy())
+                all_weights_for_pca_list.append(weights)
                 pca_point_metadata.append({'method': 'MAML', 'state': 'Initial', 'seed': seed, 'arch': arch_name})
             except Exception as e:
                 print(f"    ERROR generating initial MAML weights for seed {seed}, arch {arch_name}: {e}")
@@ -156,7 +155,7 @@ def main():
             if maml_model_path.exists():
                 try:
                     weights = load_and_flatten_weights(maml_model_path)
-                    all_weights_for_pca_list.append(weights.numpy())
+                    all_weights_for_pca_list.append(weights)
                     pca_point_metadata.append({'method': 'MAML', 'state': 'Final', 'seed': seed, 'arch': arch_name})
                 except Exception as e:
                     print(f"    ERROR loading final MAML weights from {maml_model_path}: {e}")
@@ -168,7 +167,7 @@ def main():
             print(f"  Getting initial Vanilla SGD weights for seed {seed}...")
             try:
                 weights = get_initial_flattened_weights(model_class, seed, args.num_input_channels, args.num_classes)
-                all_weights_for_pca_list.append(weights.numpy())
+                all_weights_for_pca_list.append(weights)
                 pca_point_metadata.append({'method': 'Vanilla', 'state': 'Initial', 'seed': seed, 'arch': arch_name})
             except Exception as e:
                 print(f"    ERROR generating initial Vanilla weights for seed {seed}, arch {arch_name}: {e}")
@@ -180,7 +179,7 @@ def main():
             if vanilla_model_path.exists():
                 try:
                     weights = load_and_flatten_weights(vanilla_model_path)
-                    all_weights_for_pca_list.append(weights.numpy())
+                    all_weights_for_pca_list.append(weights)
                     pca_point_metadata.append({'method': 'Vanilla', 'state': 'Final', 'seed': seed, 'arch': arch_name})
                 except Exception as e:
                     print(f"    ERROR loading final Vanilla weights from {vanilla_model_path}: {e}")
