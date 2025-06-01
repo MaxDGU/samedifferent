@@ -74,33 +74,48 @@ def get_initial_flattened_weights(model_class, seed, num_input_channels=1, num_c
     return flat_weights.numpy()
 
 def load_and_flatten_weights(model_path):
-    # Load with weights_only=True for security and future compatibility
-    checkpoint = torch.load(model_path, map_location='cpu', weights_only=True)
+    # Revert to weights_only=False as checkpoints contain argparse.Namespace
+    checkpoint = torch.load(model_path, map_location='cpu', weights_only=False) 
     
     state_dict = None
-    # If weights_only=True, torch.load directly returns the state_dict 
-    # if the file was saved with torch.save(model.state_dict(), ...)
-    # or it returns the model itself if saved with torch.save(model, ...)
-    # However, our previous scripts likely saved dicts like {'model_state_dict': ...}
-    # When weights_only=True, loading such a structure might require that the keys 
-    # are simple and the values are tensors. Let's assume for now it works, 
-    # or adjust if specific errors arise from weights_only=True.
-    # For a simple state_dict save, checkpoint would be the state_dict directly.
     if isinstance(checkpoint, dict):
-        # Common patterns for checkpoint dictionaries
         if 'model_state_dict' in checkpoint:
             state_dict = checkpoint['model_state_dict']
-        elif 'state_dict' in checkpoint:
+        elif 'state_dict' in checkpoint: 
             state_dict = checkpoint['state_dict']
-        elif all(isinstance(v, torch.Tensor) for v in checkpoint.values()):
+        elif 'model' in checkpoint and hasattr(checkpoint['model'], 'state_dict'): # MAML saves model object
+             model_loaded = checkpoint['model']
+             # If model was saved with DataParallel, keys might have 'module.' prefix
+             # Creating a new OrderedDict ensures we handle this potential prefix correctly,
+             # though if your training scripts already saved model.module.state_dict(), it's not strictly needed.
+             new_state_dict = OrderedDict()
+             for k, v in model_loaded.state_dict().items():
+                 name = k[7:] if k.startswith('module.') else k 
+                 new_state_dict[name] = v
+             state_dict = new_state_dict
+        elif all(isinstance(v, torch.Tensor) for v in checkpoint.values()): 
             # If it's a dict of tensors, assume it IS the state_dict
+            # This is less likely for your MAML/Vanilla checkpoints but good to have
             state_dict = checkpoint
         else:
-            # This case might be more complex with weights_only=True if it contains non-tensor data
-            raise ValueError(f"Checkpoint at {model_path} is a dict but not a recognized state_dict format for weights_only=True loading.")
-    elif isinstance(checkpoint, OrderedDict) and all(isinstance(v, torch.Tensor) for v in checkpoint.values()):
+            # Fallback: if the checkpoint is a dict but no known keys, assume it is the state_dict itself.
+            # This might happen if torch.save(model.state_dict(), path) was used directly
+            # and the state_dict itself was a plain dict (not OrderedDict).
+            # Check if all values are tensors to be safer.
+            if all(isinstance(v, (torch.Tensor, torch.nn.Parameter)) for v in checkpoint.values()):
+                 state_dict = checkpoint
+            else:
+                raise ValueError(f"Checkpoint at {model_path} is a dict but not a recognized state_dict format or simple model wrapper.")
+    elif isinstance(checkpoint, OrderedDict) and all(isinstance(v, (torch.Tensor, torch.nn.Parameter)) for v in checkpoint.values()):
         # Directly saved state_dict (often an OrderedDict)
         state_dict = checkpoint
+    elif hasattr(checkpoint, 'state_dict'): # If the checkpoint is the model object itself
+        # This can happen if torch.save(model, path) was used
+        new_state_dict = OrderedDict()
+        for k, v in checkpoint.state_dict().items():
+            name = k[7:] if k.startswith('module.') else k
+            new_state_dict[name] = v
+        state_dict = new_state_dict
     else:
         raise ValueError(f"Could not extract state_dict from checkpoint at {model_path}. Loaded object type: {type(checkpoint)}")
 
@@ -108,7 +123,7 @@ def load_and_flatten_weights(model_path):
         raise ValueError(f"State_dict is None after attempting to load from {model_path}")
             
     flat_weights = torch.cat([p.cpu().flatten() for p in state_dict.values()])
-    return flat_weights.numpy() # Ensure NumPy array is returned
+    return flat_weights.numpy()
 
 def main():
     args = parse_args()
@@ -133,10 +148,12 @@ def main():
              print(f"CRITICAL ERROR: Model class for {arch_name} is a DummyModel. Cannot proceed. Aborting.", file=sys.stderr)
              return 1
 
-
         all_weights_for_pca_list = []
         # Stores dicts: {'method': str, 'state': str, 'seed': int, 'arch': str}
         pca_point_metadata = [] 
+        # Store initial and final PCA points to draw lines later
+        # Structure: {(method, seed): {'initial': (pc1, pc2), 'final': (pc1, pc2)}}
+        trajectory_points = {} 
 
         # --- Collect Initial MAML Weights ---
         for seed in args.seeds:
@@ -145,6 +162,9 @@ def main():
                 weights = get_initial_flattened_weights(model_class, seed, args.num_input_channels, args.num_classes)
                 all_weights_for_pca_list.append(weights)
                 pca_point_metadata.append({'method': 'MAML', 'state': 'Initial', 'seed': seed, 'arch': arch_name})
+                if ('MAML', seed) not in trajectory_points: trajectory_points[('MAML', seed)] = {}
+                # Temporarily store raw weights; will be replaced by PCA coords later
+                trajectory_points[('MAML', seed)]['initial_raw'] = weights 
             except Exception as e:
                 print(f"    ERROR generating initial MAML weights for seed {seed}, arch {arch_name}: {e}")
 
@@ -157,6 +177,8 @@ def main():
                     weights = load_and_flatten_weights(maml_model_path)
                     all_weights_for_pca_list.append(weights)
                     pca_point_metadata.append({'method': 'MAML', 'state': 'Final', 'seed': seed, 'arch': arch_name})
+                    if ('MAML', seed) not in trajectory_points: trajectory_points[('MAML', seed)] = {}
+                    trajectory_points[('MAML', seed)]['final_raw'] = weights
                 except Exception as e:
                     print(f"    ERROR loading final MAML weights from {maml_model_path}: {e}")
             else:
@@ -169,6 +191,8 @@ def main():
                 weights = get_initial_flattened_weights(model_class, seed, args.num_input_channels, args.num_classes)
                 all_weights_for_pca_list.append(weights)
                 pca_point_metadata.append({'method': 'Vanilla', 'state': 'Initial', 'seed': seed, 'arch': arch_name})
+                if ('Vanilla', seed) not in trajectory_points: trajectory_points[('Vanilla', seed)] = {}
+                trajectory_points[('Vanilla', seed)]['initial_raw'] = weights
             except Exception as e:
                 print(f"    ERROR generating initial Vanilla weights for seed {seed}, arch {arch_name}: {e}")
 
@@ -181,6 +205,8 @@ def main():
                     weights = load_and_flatten_weights(vanilla_model_path)
                     all_weights_for_pca_list.append(weights)
                     pca_point_metadata.append({'method': 'Vanilla', 'state': 'Final', 'seed': seed, 'arch': arch_name})
+                    if ('Vanilla', seed) not in trajectory_points: trajectory_points[('Vanilla', seed)] = {}
+                    trajectory_points[('Vanilla', seed)]['final_raw'] = weights
                 except Exception as e:
                     print(f"    ERROR loading final Vanilla weights from {vanilla_model_path}: {e}")
             else:
@@ -207,43 +233,88 @@ def main():
             print(f"  PCA failed for {arch_name}: {e}. Weight matrix shape: {weights_matrix.shape}")
             continue
         
+        # Populate trajectory_points with PCA coordinates
+        current_pca_idx = 0
+        for meta_idx, meta in enumerate(pca_point_metadata):
+            method_seed_key = (meta['method'], meta['seed'])
+            state_key_pca = 'initial' if meta['state'] == 'Initial' else 'final' # To store PCA coords
+            
+            # Check if this point corresponds to one we stored raw weights for
+            # This check is to ensure we only try to get PCA for points that were actually loaded
+            # And that we don't go out of bounds if some raw weights were missing
+            if method_seed_key in trajectory_points and f'{state_key_pca}_raw' in trajectory_points[method_seed_key]:
+                if current_pca_idx < len(transformed_weights):
+                    trajectory_points[method_seed_key][state_key_pca] = (transformed_weights[current_pca_idx, 0], transformed_weights[current_pca_idx, 1])
+                    current_pca_idx += 1
+                else:
+                    print(f"    WARNING: Ran out of transformed_weights for {method_seed_key}, {state_key_pca}. Skipping for trajectory line.")
+            
         # --- Plotting ---
-        plt.figure(figsize=(12, 10))
+        plt.figure(figsize=(14, 10)) # Slightly wider for lines
         colors = {'MAML': '#1f77b4', 'Vanilla': '#ff7f0e'} 
         markers = {'Initial': 'o', 'Final': 'x'}
+        line_styles = {'MAML': ':', 'Vanilla': '--'} # Different line styles for MAML and Vanilla trajectories
         
-        # To ensure unique legend entries
         plotted_legend_labels = {} 
 
-        for i, meta in enumerate(pca_point_metadata):
+        # First, plot all scatter points
+        # Iterate through pca_point_metadata to ensure correct association with transformed_weights
+        scatter_idx = 0
+        for meta in pca_point_metadata:
             method = meta['method']
             state = meta['state']
             
-            pc1 = transformed_weights[i, 0]
-            pc2 = transformed_weights[i, 1]
+            # Check if this point was successfully transformed by PCA
+            # (This implies it was successfully loaded initially)
+            method_seed_key = (meta['method'], meta['seed'])
+            state_key_pca = 'initial' if meta['state'] == 'Initial' else 'final'
             
-            # Create a unique key for the legend for this combination of method and state
-            label_key = f"{method} {state}"
+            if method_seed_key in trajectory_points and state_key_pca in trajectory_points[method_seed_key]:
+                pc1, pc2 = trajectory_points[method_seed_key][state_key_pca]
+                label_key = f"{method} {state}"
+                
+                plt.scatter(pc1, pc2, 
+                            color=colors[method], 
+                            marker=markers[state], 
+                            s=120, # marker size
+                            alpha=0.8,
+                            label=label_key if label_key not in plotted_legend_labels else None, 
+                            zorder=3) # Ensure points are above lines
+                
+                if label_key not in plotted_legend_labels:
+                    plotted_legend_labels[label_key] = True
+            else:
+                # This case should ideally not happen if PCA was successful and trajectory_points was populated correctly
+                # But as a fallback, try to use scatter_idx if this point did contribute to PCA
+                # This path is less robust, relying on matching order.
+                if scatter_idx < len(transformed_weights):
+                    pc1 = transformed_weights[scatter_idx, 0]
+                    pc2 = transformed_weights[scatter_idx, 1]
+                    label_key = f"{method} {state}" # May create duplicate legend items if not careful
+                    plt.scatter(pc1, pc2, color=colors[method], marker=markers[state], s=120, alpha=0.8, label=label_key if label_key not in plotted_legend_labels else None, zorder=3)
+                    if label_key not in plotted_legend_labels: plotted_legend_labels[label_key] = True
+                scatter_idx +=1 # Increment only if used
             
-            plt.scatter(pc1, pc2, 
-                        color=colors[method], 
-                        marker=markers[state], 
-                        s=100, # marker size
-                        alpha=0.7,
-                        label=label_key if label_key not in plotted_legend_labels else None) # Add label only if it's new
-            
-            if label_key not in plotted_legend_labels:
-                plotted_legend_labels[label_key] = True # Mark this label as plotted for legend purposes
+
+        # Then, draw trajectory lines
+        for (method, seed), points in trajectory_points.items():
+            if 'initial' in points and 'final' in points:
+                initial_pt = points['initial']
+                final_pt = points['final']
+                plt.plot([initial_pt[0], final_pt[0]], [initial_pt[1], final_pt[1]],
+                         linestyle=line_styles[method],
+                         color=colors[method],
+                         alpha=0.5, 
+                         linewidth=1.5,
+                         zorder=2) # Lines behind points
         
         plt.title(f'PCA of Model Weights: {arch_name.upper()}', fontsize=16)
         plt.xlabel(f'Principal Component 1 (Explains {pca.explained_variance_ratio_[0]:.2%} variance)', fontsize=12)
         plt.ylabel(f'Principal Component 2 (Explains {pca.explained_variance_ratio_[1]:.2%} variance)', fontsize=12)
         plt.grid(True, linestyle='--', alpha=0.6)
         
-        # Create legend from unique labels automatically gathered by scatter
         handles, labels = plt.gca().get_legend_handles_labels()
         if handles: 
-            # Define desired order for legend items
             desired_order = ["MAML Initial", "MAML Final", "Vanilla Initial", "Vanilla Final"]
             ordered_handles = []
             ordered_labels = []
@@ -254,14 +325,12 @@ def main():
                     ordered_labels.append(lbl)
                     ordered_handles.append(label_to_handle_map[lbl])
             
-            # Add any other labels that might have been generated if not in desired_order
-            # (e.g. if some data was missing and a category wasn't plotted)
             for lbl, hdl in label_to_handle_map.items():
                 if lbl not in ordered_labels:
                     ordered_labels.append(lbl)
                     ordered_handles.append(hdl)
 
-            plt.legend(ordered_handles, ordered_labels, title="Weight Group", fontsize=10, title_fontsize=12)
+            plt.legend(ordered_handles, ordered_labels, title="Weight Group", fontsize=10, title_fontsize=12, loc='best')
         
         plot_filename = output_path / f"pca_weights_{arch_name}.png"
         plt.tight_layout() # Adjust plot to ensure everything fits without overlapping
