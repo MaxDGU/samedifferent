@@ -1,18 +1,18 @@
 #!/bin/bash
-#SBATCH --job-name=meta_nat_exp  # Job name
+#SBATCH --job-name=meta_nat_exp_add_seeds  # Job name
 #SBATCH --nodes=1                # Number of nodes
 #SBATCH --ntasks=1               # Number of tasks (MPI processes)
 #SBATCH --cpus-per-task=4        # Number of CPU cores per task
 #SBATCH --mem=16G                # Memory per node
-#SBATCH --time=10::00:00          # Walltime limit (HH:MM:SS)
+#SBATCH --time=10:00:00          # Walltime limit (HH:MM:SS) # Adjust if new seeds take longer/shorter
 #SBATCH --gres=gpu:1             # Number of GPUs per node
 #SBATCH --partition=pli
 #SBATCH --account=nam
-#SBATCH --output=slurm_logs/meta_nat_exp_%A_%a.out # Standard output and error log, %A is job ID, %a is array task ID
-#SBATCH --array=0-8              # Array job: 3 seeds * 3 architectures = 9 jobs (0-8)
+#SBATCH --output=slurm_logs/meta_nat_exp_add_seeds_%A_%a.out # Standard output and error log
+#SBATCH --array=0-5              # Array job: 2 new seeds * 3 architectures = 6 jobs (0-5)
 
 # --- Environment Setup ---
-echo "Setting up environment..."
+echo "Setting up environment for additional seeds..."
 source /usr/share/Modules/init/bash # Initialize environment modules
 module purge                     # Remove any inherited modules
 module load anaconda3/2023.9      # Load Anaconda
@@ -27,11 +27,11 @@ DATA_DIR="${PROJECT_DIR}/data/naturalistic"
 LOG_BASE_DIR="${PROJECT_DIR}/logs_naturalistic_meta" # Base directory for logs from these experiments
 
 # --- Parameters ---
-SEEDS=(42 123 789)
+SEEDS=(555 999) # <<-- MODIFIED: Only the two new seeds
 ARCHITECTURES=("conv2lr" "conv4lr" "conv6lr")
 
 # Calculate seed and architecture for this array task
-NUM_SEEDS=${#SEEDS[@]}
+NUM_SEEDS=${#SEEDS[@]} # This will now be 2
 NUM_ARCHS=${#ARCHITECTURES[@]}
 
 SEED_INDEX=$((SLURM_ARRAY_TASK_ID / NUM_ARCHS))
@@ -43,15 +43,16 @@ ARCH=${ARCHITECTURES[$ARCH_INDEX]}
 echo "SLURM_JOB_ID: ${SLURM_JOB_ID}"
 echo "SLURM_ARRAY_JOB_ID: ${SLURM_ARRAY_JOB_ID}"
 echo "SLURM_ARRAY_TASK_ID: ${SLURM_ARRAY_TASK_ID}"
-echo "Running with Seed: ${SEED}, Architecture: ${ARCH}"
+echo "Running with NEW Seed: ${SEED}, Architecture: ${ARCH}"
 
 # Create a unique log directory for this specific run
+# This will create new seed folders like seed_555, seed_999 under each architecture
 RUN_LOG_DIR="${LOG_BASE_DIR}/${ARCH}/seed_${SEED}"
 mkdir -p "${RUN_LOG_DIR}"
 echo "Logging to: ${RUN_LOG_DIR}"
 
 # --- Run Training Script ---
-echo "Starting meta-training script..."
+echo "Starting meta-training script for new seed..."
 python "${SCRIPT_PATH}" \
     --model "${ARCH}" \
     --seed "${SEED}" \
@@ -70,7 +71,7 @@ python "${SCRIPT_PATH}" \
     # Add any other parameters you want to control from here
     # --first_order \ # Uncomment to use first-order MAML
 
-echo "Script finished."
+echo "Script finished for new seed."
 date
 
 # --- Example: How to submit this script ---
