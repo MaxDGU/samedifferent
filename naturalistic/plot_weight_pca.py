@@ -10,6 +10,12 @@ import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from collections import OrderedDict
 
+# Define DummyModel at the top level so it's always available
+class DummyModel:
+    def __init__(self, *args, **kwargs): pass
+    def eval(self): pass
+    def state_dict(self): return {}
+
 # Add project root to sys.path to allow importing 'baselines'
 # Assumes the script is in 'naturalistic' directory, and 'baselines' is in parent.
 try:
@@ -25,19 +31,16 @@ try:
     }
 except ImportError as e:
     print(f"CRITICAL ERROR: Could not import model classes from 'baselines.models': {e}", file=sys.stderr)
-    print("Ensure 'baselines' directory is at the project root and contains model definitions (ConvNet2LR, etc.).", file=sys.stderr)
-    print(f"Project root determined as: {project_root}", file=sys.stderr)
+    print("Ensure 'baselines' directory is at the project root and contains model definitions (conv2, etc.).", file=sys.stderr)
+    # project_root might not be defined if Path(__file__) fails, though unlikely here.
+    try:
+        print(f"Project root determined as: {project_root}", file=sys.stderr)
+    except NameError:
+        print("Project root could not be determined.", file=sys.stderr)
     print(f"Current sys.path: {sys.path}", file=sys.stderr)
-    # Define dummy classes if import fails, to prevent script from crashing immediately,
-    # but it won't function correctly.
-    class DummyModel:
-        def __init__(self, *args, **kwargs): pass
-        def eval(self): pass
-        def state_dict(self): return {}
-    MODEL_CLASSES = {'conv2lr': conv2, 'conv4lr': conv4, 'conv6lr': conv6}
-    # It's better to exit if models can't be loaded, as the script is useless.
-    # However, for tool execution flow, this might be problematic.
-    # For now, it will try to run but likely fail at model instantiation.
+    # Now, use the globally defined DummyModel
+    MODEL_CLASSES = {'conv2lr': DummyModel, 'conv4lr': DummyModel, 'conv6lr': DummyModel}
+    print("Fell back to using DummyModel instances due to import error.", file=sys.stderr)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate PCA plots of initial and final model weights for MAML and Vanilla SGD.")
