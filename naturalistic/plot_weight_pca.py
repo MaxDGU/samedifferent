@@ -287,27 +287,33 @@ def main():
         colors = {'MAML': '#1f77b4', 'Vanilla': '#ff7f0e'}
         markers = {'Initial': 'o', 'Final': 'x'}
         line_styles = {'MAML': ':', 'Vanilla': '--'}
-        plotted_legend_labels = {}
+        plotted_legend_labels = set() # Use a set for faster lookups and unique entries
 
-        # Plot scatter points by iterating through successfully transformed points in trajectory_points
-        for (method, seed), points_data in current_arch_trajectory_points.items():
-            # Plot Initial Point if available
-            if 'initial' in points_data:
-                pc1, pc2 = points_data['initial']
-                label_key = f"{method} Initial"
-                plt.scatter(pc1, pc2, color=colors[method], marker=markers['Initial'], s=120, alpha=0.8,
-                            label=label_key if label_key not in plotted_legend_labels else None, zorder=3)
-                if label_key not in plotted_legend_labels: plotted_legend_labels[label_key] = True
+        # Plot scatter points explicitly for each category to ensure all are attempted
+        # Iterate through the original filtered metadata to maintain order and access all points
+        # that contributed to the PCA.
+        for idx, meta in enumerate(current_arch_pca_metadata):
+            method = meta['method']
+            state = meta['state']
+            seed = meta['seed']
             
-            # Plot Final Point if available
-            if 'final' in points_data:
-                pc1, pc2 = points_data['final']
-                label_key = f"{method} Final"
-                plt.scatter(pc1, pc2, color=colors[method], marker=markers['Final'], s=120, alpha=0.8,
-                            label=label_key if label_key not in plotted_legend_labels else None, zorder=3)
-                if label_key not in plotted_legend_labels: plotted_legend_labels[label_key] = True
+            # Find the corresponding PCA coordinates from transformed_weights
+            # This idx corresponds to the row in weights_matrix and transformed_weights
+            pc1 = transformed_weights[idx, 0]
+            pc2 = transformed_weights[idx, 1]
+            
+            label_key = f"{method} {state}" # e.g., MAML Initial
 
-        # Draw trajectory lines
+            plt.scatter(pc1, pc2, 
+                        color=colors[method], 
+                        marker=markers[state],
+                        s=120, alpha=0.8,
+                        label=label_key if label_key not in plotted_legend_labels else None,
+                        zorder=3)
+            if label_key not in plotted_legend_labels:
+                plotted_legend_labels.add(label_key)
+        
+        # Draw trajectory lines using the populated current_arch_trajectory_points
         for (method, seed), points_data in current_arch_trajectory_points.items():
             if 'initial' in points_data and 'final' in points_data:
                 initial_pt = points_data['initial']
@@ -322,30 +328,19 @@ def main():
         plt.grid(True, linestyle='--', alpha=0.6)
         
         handles, labels = plt.gca().get_legend_handles_labels()
-        # Sort legend items: MAML Initial, MAML Final, Vanilla Initial, Vanilla Final
         if handles:
             legend_order = ["MAML Initial", "MAML Final", "Vanilla Initial", "Vanilla Final"]
-            sorted_legend_elements = sorted(zip(handles, labels), key=lambda x: legend_order.index(x[1]) if x[1] in legend_order else float('inf'))
-            # Filter out elements not in desired_order if you want to be strict, or just use what was plotted
-            final_handles = [h for h, l in sorted_legend_elements if l in plotted_legend_labels] # ensure we only add legend for plotted items
-            final_labels = [l for h, l in sorted_legend_elements if l in plotted_legend_labels]
+            # Create a dictionary for fast lookup of desired order
+            order_map = {label: i for i, label in enumerate(legend_order)}
+            # Sort existing handles and labels based on the desired order
+            # Put items not in legend_order at the end.
+            sorted_legend_elements = sorted(zip(handles, labels), key=lambda hl_pair: order_map.get(hl_pair[1], float('inf')))
             
-            # Add any other plotted items that weren't in the explicit order (though ideally all should be)
-            temp_plotted_handles, temp_plotted_labels = [], []
-            seen_labels_in_sorted = set(final_labels)
-            original_label_to_handle = dict(zip(labels, handles))
-            for lbl in plotted_legend_labels:
-                if lbl not in seen_labels_in_sorted:
-                    temp_plotted_labels.append(lbl)
-                    temp_plotted_handles.append(original_label_to_handle[lbl])
-            
-            final_handles.extend(temp_plotted_handles)
-            final_labels.extend(temp_plotted_labels)
+            final_handles = [h for h, l in sorted_legend_elements]
+            final_labels = [l for h, l in sorted_legend_elements]
 
             if final_handles:
                  plt.legend(final_handles, final_labels, title="Weight Group", fontsize=10, title_fontsize=12, loc='best')
-            elif handles: # Fallback if sorting somehow failed but we have legend items
-                plt.legend(handles, labels, title="Weight Group", fontsize=10, title_fontsize=12, loc='best')
 
         plot_filename = output_path / f"pca_weights_{arch_name}.png"
         plt.tight_layout()
