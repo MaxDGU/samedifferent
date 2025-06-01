@@ -17,11 +17,11 @@ try:
     project_root = script_dir.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    from baselines.models import ConvNet2LR, ConvNet4LR, ConvNet6LR
+    from baselines.models import conv2, conv4, conv6
     MODEL_CLASSES = {
-        'conv2lr': ConvNet2LR,
-        'conv4lr': ConvNet4LR,
-        'conv6lr': ConvNet6LR,
+        'conv2lr': conv2,
+        'conv4lr': conv4,
+        'conv6lr': conv6,
     }
 except ImportError as e:
     print(f"CRITICAL ERROR: Could not import model classes from 'baselines.models': {e}", file=sys.stderr)
