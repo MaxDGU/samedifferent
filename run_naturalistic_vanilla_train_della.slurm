@@ -24,6 +24,10 @@ echo "Python executable: $(which python)"
 PROJECT_DIR="/scratch/gpfs/mg7411/samedifferent" # CHANGE THIS TO YOUR PROJECT DIRECTORY ON DELLA
 TRAIN_SCRIPT_PATH="${PROJECT_DIR}/naturalistic/train_vanilla.py"
 
+# --- Set PYTHONPATH --- 
+export PYTHONPATH="${PROJECT_DIR}:${PYTHONPATH}"
+echo "PYTHONPATH set to: ${PYTHONPATH}"
+
 # --- Data Source ---
 # Updated to the confirmed path on Della
 DATA_DIR_ABS="/scratch/gpfs/mg7411/data/naturalistic/N_16/trainsize_6400_1200-300-100"
