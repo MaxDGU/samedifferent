@@ -25,8 +25,8 @@ PROJECT_DIR="/scratch/gpfs/mg7411/samedifferent" # CHANGE THIS TO YOUR PROJECT D
 TRAIN_SCRIPT_PATH="${PROJECT_DIR}/naturalistic/train_vanilla.py"
 
 # --- Data Source ---
-# This is the specific dataset slice you mentioned
-DATA_DIR_ABS="${PROJECT_DIR}/naturalistic/objectsall_2/aligned/N_16/trainsize_6400_1200-300-100"
+# Updated to the confirmed path on Della
+DATA_DIR_ABS="/scratch/gpfs/mg7411/data/naturalistic/N_16/trainsize_6400_1200-300-100"
 
 # --- Output Base Directory for Vanilla Models ---
 LOG_BASE_VANILLA_DIR="${PROJECT_DIR}/logs_naturalistic_vanilla"
