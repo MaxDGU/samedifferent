@@ -86,7 +86,16 @@ class PBDataset(Dataset):
             self.task_data[task_name]['labels'] = np.array(self.task_data[task_name]['labels'])
             
             print(f"Loaded {task_loaded_images} images for task {task_name} ({split})")
-            # print(f"Label distribution: {np.bincount(self.task_data[task_name]['labels'].astype(int))}")
+            # print(f"Label distribution: {np.bincount(self.task_data[task_name]['labels'].astype(int))}") # Old commented out
+            # New detailed label logging
+            unique_labels, counts = np.unique(self.task_data[task_name]['labels'].astype(int), return_counts=True)
+            label_dist_str = ", ".join([f"Label {l}: {c}" for l, c in zip(unique_labels, counts)])
+            print(f"  Task {task_name} ({split}) Label Distribution: {label_dist_str}")
+            if len(unique_labels) == 1:
+                print(f"  WARNING: Task {task_name} ({split}) has only one class label: {unique_labels[0]}")
+            elif len(unique_labels) == 0:
+                print(f"  ERROR: Task {task_name} ({split}) has NO labels loaded.")
+            # End new detailed label logging
             total_loaded_images += task_loaded_images
             
         if not self.task_data:

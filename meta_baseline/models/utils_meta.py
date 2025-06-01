@@ -85,6 +85,39 @@ class SameDifferentDataset(Dataset):
         print(f"Total episodes: {self.total_episodes}")
         for task in tasks:
             print(f"Task {task}: {len(self.task_indices[task])} episodes")
+
+        # New: Log label distributions per task
+        print(f"\n--- {self.split.upper()} SET: Per-Task Label Distribution Check ---")
+        for task_name in self.tasks:
+            all_task_support_labels = []
+            all_task_query_labels = []
+            # Iterate through files associated with this task to collect all labels
+            for file_idx, file_info_check in enumerate(self.episode_files):
+                if file_info_check['task'] == task_name:
+                    with h5py.File(file_info_check['file_path'], 'r') as f_check:
+                        num_episodes_in_file = self.file_episode_counts[file_idx]
+                        for ep_idx in range(num_episodes_in_file):
+                            all_task_support_labels.extend(f_check['support_labels'][ep_idx].flatten().tolist())
+                            all_task_query_labels.extend(f_check['query_labels'][ep_idx].flatten().tolist())
+            
+            if not all_task_support_labels and not all_task_query_labels:
+                print(f"  Task {task_name} ({self.split}): No labels found.")
+                continue
+
+            combined_labels = np.array(all_task_support_labels + all_task_query_labels).astype(int)
+            if combined_labels.size == 0:
+                print(f"  Task {task_name} ({self.split}): No labels loaded after combining support/query.")
+                continue
+
+            unique_labels, counts = np.unique(combined_labels, return_counts=True)
+            label_dist_str = ", ".join([f"Label {l}: {c}" for l, c in zip(unique_labels, counts)])
+            total_labels_for_task = np.sum(counts)
+            print(f"  Task {task_name} ({self.split}): Total Labels={total_labels_for_task}, Distribution: {label_dist_str}")
+            if len(unique_labels) == 1:
+                print(f"    WARNING: Task {task_name} ({self.split}) has only one class label: {unique_labels[0]}")
+            elif len(unique_labels) == 0:
+                 print(f"    ERROR: Task {task_name} ({self.split}) has NO labels after processing all its files.")
+        print("--- End Label Distribution Check ---\n")
     
     def __len__(self):
         return self.total_episodes
