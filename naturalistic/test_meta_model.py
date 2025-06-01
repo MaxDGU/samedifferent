@@ -33,9 +33,9 @@ except ImportError as e:
     exit(1)
 
 ARCHITECTURES_CONFIG = {
-    'conv2lr': {'class': Conv2CNN, 'seeds': [42, 123, 789]},
-    'conv4lr': {'class': Conv4CNN, 'seeds': [42, 123, 789]},
-    'conv6lr': {'class': Conv6CNN, 'seeds': [42, 123, 789]}
+    'conv2lr': {'class': Conv2CNN, 'seeds': [42, 123, 789, 555, 999]},
+    'conv4lr': {'class': Conv4CNN, 'seeds': [42, 123, 789, 555, 999]},
+    'conv6lr': {'class': Conv6CNN, 'seeds': [42, 123, 789, 555, 999]}
 }
 
 def accuracy(predictions, targets):
