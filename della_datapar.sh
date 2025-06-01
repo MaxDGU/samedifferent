@@ -41,9 +41,9 @@ SINGLETASK_VAL_FREQ=5
 MAML_TRAIN_SCRIPT_PATH="${CODE_ROOT_DIR}/all_tasks/experiment_all_tasks_fomaml.py" 
 MAML_NUM_EPOCHS=50 
 MAML_META_BATCH_SIZE=16          
-MAML_ADAPTATION_STEPS=5        # Changed from 1 to 5
+MAML_ADAPTATION_STEPS=5        # Remains 5 for training
 MAML_NUM_ADAPTATION_SAMPLES=32 
-MAML_LR=0.001
+MAML_LR=0.001                  # Corresponds to inner_lr = 1e-3
 
 # --- Analysis Parameters ---
 ANALYSIS_SCRIPT_PATH="${CODE_ROOT_DIR}/weight_space_analysis/analyze_all_weights.py" 
@@ -108,7 +108,12 @@ echo "----------------------------------------------------------"
 # --- Run MAML Training (All Tasks) ---
 echo "\n>>> Running MAML Training (1 Super Epoch for ${ARCH}, seed ${SEED_VAL})..."
 echo "    Using MAML Epochs: ${MAML_NUM_EPOCHS}, Meta-Batches/Epoch: ${MAML_NUM_ADAPTATION_SAMPLES}"
-${PYTHON_EXEC} ${MAML_TRAIN_SCRIPT_PATH} \
+
+# --- Capture MAML script output to find the exact experiment path ---
+MAML_RUN_LOG_TEMP=$(mktemp)
+echo "Capturing MAML run output to ${MAML_RUN_LOG_TEMP}"
+
+( ${PYTHON_EXEC} ${MAML_TRAIN_SCRIPT_PATH} \
     --architecture "${ARCH}" \
     --seed "${SEED_VAL}" \
     --epochs "${MAML_NUM_EPOCHS}" \
@@ -117,19 +122,38 @@ ${PYTHON_EXEC} ${MAML_TRAIN_SCRIPT_PATH} \
     --inner_lr "${MAML_LR}" \
     --outer_lr 0.0001 \
     --adaptation_steps "${MAML_ADAPTATION_STEPS}" \
-    --adaptation_steps_test 10 \
+    --adaptation_steps_test 15 \
     --first_order \
     --output_base_dir "${MAML_RESULTS_ROOT}" \
-    --data_dir "${HDF5_DATA_DIR}"
+    --data_dir "${HDF5_DATA_DIR}" \
+    --track_bn_stats # Explicitly add flag
+) 2>&1 | tee "${MAML_RUN_LOG_TEMP}"
 
-MAML_ACTUAL_EXP_DIR=$(find "${MAML_RESULTS_ROOT}" -type d -name "exp_all_tasks_fomaml_${ARCH}_seed${SEED_VAL}_*" -print0 | xargs -0 ls -td | head -n 1)
+MAML_ACTUAL_EXP_DIR=$(grep "Results will be saved to:" "${MAML_RUN_LOG_TEMP}" | sed -n 's/Results will be saved to: //p')
 
 if [ -z "${MAML_ACTUAL_EXP_DIR}" ]; then
-    echo "ERROR: Could not find MAML experiment directory in ${MAML_RESULTS_ROOT}"
-    echo "       Expected pattern: exp_all_tasks_fomaml_${ARCH}_seed${SEED_VAL}_*"
+    echo "ERROR: Could not determine MAML experiment directory from script output stored in ${MAML_RUN_LOG_TEMP}."
+    echo "Full log from MAML script:"
+    cat "${MAML_RUN_LOG_TEMP}"
+    rm -f "${MAML_RUN_LOG_TEMP}"
+    exit 1
+else
+    echo "Successfully captured MAML experiment directory: ${MAML_ACTUAL_EXP_DIR}"
+    # Optional: Clean up the log file if successfully parsed and not needed for other debugging.
+    # If you want to keep it for other reasons, comment out the rm line.
+    rm -f "${MAML_RUN_LOG_TEMP}"
+fi
+# --- End MAML script output capture ---
+
+# Original find command - replaced by direct capture above
+# MAML_ACTUAL_EXP_DIR=$(find "${MAML_RESULTS_ROOT}" -type d -name "exp_all_tasks_fomaml_${ARCH}_seed${SEED_VAL}_*" -print0 | xargs -0 ls -td | head -n 1)
+
+# Check if MAML_ACTUAL_EXP_DIR is still empty after the new method (should have exited if grep failed)
+if [ -z "${MAML_ACTUAL_EXP_DIR}" ]; then
+    echo "ERROR: MAML_ACTUAL_EXP_DIR is empty even after attempting to capture from script output."
     exit 1
 fi
-echo "  MAML Experiment Output Directory: ${MAML_ACTUAL_EXP_DIR}"
+echo "  MAML Experiment Output Directory (to be used by PCA): ${MAML_ACTUAL_EXP_DIR}"
 echo "--- MAML Training Finished ---"
 echo "----------------------------------------------------------"
 
