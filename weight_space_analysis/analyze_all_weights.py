@@ -35,14 +35,17 @@ INITIAL_LABEL = "Initial Weights"
 def flatten_weights(state_dict):
     all_weights = []
     if state_dict is None: 
+        print("    DEBUG: flatten_weights received a None state_dict.")
         return None
     for key in sorted(state_dict.keys()):
         param = state_dict[key]
         if isinstance(param, torch.Tensor):
             all_weights.append(param.detach().cpu().numpy().flatten())
     if not all_weights:
+        print("    DEBUG: flatten_weights: no weights found in state_dict to concatenate.")
         return None
-    return np.concatenate(all_weights)
+    concatenated = np.concatenate(all_weights)
+    return concatenated
 
 def print_state_dict_summary(state_dict, model_type_label):
     print(f"    DEBUG: State dict summary for {model_type_label}:")
@@ -143,8 +146,8 @@ def main(args):
                                 initial_weight_label_for_specific_run = INITIAL_LABEL 
                                 initial_weight_seed_for_specific_run = seed_val_to_load 
                                 initial_weight_category_for_specific_run = 'initial_common'
-                                print(f"    Successfully loaded and flattened THE initial model (Seed {seed_val_to_load}). Norm: {np.linalg.norm(flat_weights_initial)}")
-                                if arch_name == 'conv4': # Or specific_arch_to_analyze
+                                print(f"    Successfully loaded and flattened THE initial model (Seed {seed_val_to_load}). Norm: {np.linalg.norm(flat_weights_initial):.4e}")
+                                if arch_name == args.specific_arch_to_analyze or (not args.specific_arch_to_analyze and arch_name == 'conv4'):
                                      print_state_dict_summary(state_dict_initial, f"INITIAL common ({arch_name}, seed {seed_val_to_load})")
                             else:
                                 print(f"    Warning: Flatten_weights returned None for THE initial model at {initial_model_path_candidate}")
@@ -167,6 +170,7 @@ def main(args):
                             all_final_single_task_point_labels.append(task_name)
                             all_final_single_task_seed_labels.append(seed_val_to_load)
                             all_final_single_task_point_categories.append('single_task_final')
+                            print(f"      Loaded FINAL single-task: {task_name}, seed {seed_val_to_load}, norm: {np.linalg.norm(flat_weights):.4e}")
                             found_final_weights += 1
                             task_found_final_seeds_this_task += 1
                     except Exception as e:
@@ -196,8 +200,9 @@ def main(args):
                         initial_weight_label_for_specific_run = INITIAL_LABEL 
                         initial_weight_seed_for_specific_run = args.specific_seed_to_analyze 
                         initial_weight_category_for_specific_run = 'initial_common'
-                        print(f"    Successfully loaded and flattened THE initial model (Seed {args.specific_seed_to_analyze}) from MAML dir. Norm: {np.linalg.norm(flat_weights_initial)}")
-                        if arch_name == 'conv4': print_state_dict_summary(state_dict_initial, f"INITIAL common from MAML dir ({arch_name}, seed {args.specific_seed_to_analyze})")
+                        print(f"    Successfully loaded and flattened THE initial model (Seed {args.specific_seed_to_analyze}) from MAML dir. Norm: {np.linalg.norm(flat_weights_initial):.4e}")
+                        if arch_name == args.specific_arch_to_analyze or (not args.specific_arch_to_analyze and arch_name == 'conv4'):
+                             print_state_dict_summary(state_dict_initial, f"INITIAL common from MAML dir ({arch_name}, seed {args.specific_seed_to_analyze})")
                     else: print(f"    Warning: Flatten_weights returned None for THE initial model from MAML dir {maml_initial_path_candidate}")
                 except Exception as e: print(f"    Error loading THE initial model from MAML dir {maml_initial_path_candidate}: {e}")
 
@@ -215,7 +220,7 @@ def main(args):
                         print(f"    Warning: Loaded MAML model from {maml_model_path} is not a state_dict or recognized checkpoint format. Type: {type(state_dict_loaded)}")
 
                     if state_dict_to_flatten:
-                        if arch_name == 'conv4' and not printed_maml_summary_for_current_arch : # Debug for general case with specific path
+                        if arch_name == args.specific_arch_to_analyze or (not args.specific_arch_to_analyze and arch_name == 'conv4'):
                              print_state_dict_summary(state_dict_to_flatten, f"SPECIFIC MAML {arch_name} (seed {args.specific_seed_to_analyze if args.specific_seed_to_analyze is not None else 'N/A'})")
                              printed_maml_summary_for_current_arch = True
                         flat_weights = flatten_weights(state_dict_to_flatten)
@@ -225,6 +230,11 @@ def main(args):
                             all_maml_seed_labels.append(args.specific_seed_to_analyze if args.specific_seed_to_analyze is not None else -1) # Use specific seed or -1
                             all_maml_point_categories.append('maml_all')
                             maml_found_total_seeds += 1 # Counts as one MAML model for this specific run
+                            print(f"    Successfully loaded and flattened SPECIFIC MAML model. Norm: {np.linalg.norm(flat_weights):.4e}")
+                        else:
+                            print(f"    Warning: Flatten_weights returned None for SPECIFIC MAML model from {maml_model_path}")
+                    else:
+                        print(f"    Warning: state_dict_to_flatten is None for MAML model at {maml_model_path}. Cannot process.")
                 except Exception as e:
                     print(f"    Error loading SPECIFIC MAML (all tasks) weights for {arch_name} from {maml_model_path}: {e}")
             print(f"    Found {maml_found_total_seeds} SPECIFIC MAML (all tasks) model for {arch_name}.")
