@@ -560,7 +560,7 @@ def main():
             if best_model_path.exists():
                 print(f"Loading best model for testing from: {best_model_path}")
                 try:
-                    checkpoint = torch.load(best_model_path, map_location=device, weights_only=True)
+                    checkpoint = torch.load(best_model_path, map_location=device, weights_only=False)
                     # Load base model state
                     model.load_state_dict(checkpoint['model_state_dict'])
                     # Load MAML wrapper state (includes parameters of the meta-optimizer if maml itself has params, but mainly for first_order, lr etc.)
