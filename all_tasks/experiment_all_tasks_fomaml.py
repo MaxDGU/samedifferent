@@ -35,7 +35,7 @@ ARCHITECTURES = {
 
 # Define support and query sizes for internal sampling
 VARIABLE_SUPPORT_SIZES = [4, 6, 8, 10]
-FIXED_QUERY_SIZE = 3
+FIXED_QUERY_SIZE = 2
 
 # Helper function for printing model/learner stats
 ARGS_REF_FOR_PRINTING = None # Global to be set by main for easy access in helper
@@ -401,7 +401,7 @@ def main(args):
 
     # --- Output Directory Setup ---
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # Experiment name reflects variable S and fixed Q (implicitly Q=3)
+    # Experiment name reflects variable S and fixed Q (implicitly Q=2)
     exp_name = f"exp_all_tasks_fomaml_{args.architecture}_seed{args.seed}_Svar_Q{FIXED_QUERY_SIZE}_{timestamp}"
     output_dir = Path(args.output_base_dir) / exp_name
     output_dir.mkdir(parents=True, exist_ok=True)

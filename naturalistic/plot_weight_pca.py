@@ -251,20 +251,14 @@ def main():
             print(f"  ERROR creating numpy array for {arch_name} even after filtering: {e}. Skipping.")
             continue
         
-        # We need to rebuild trajectory_points based on the filtered metadata
+        # Build current_arch_trajectory_points AFTER filtering and BEFORE PCA
+        # This ensures it only contains data for points that will be included in PCA
         current_arch_trajectory_points = {}
-        for meta in current_arch_pca_metadata: # Use filtered metadata
+        for idx, meta in enumerate(current_arch_pca_metadata): # Iterate over FILTERED metadata
             key = (meta['method'], meta['seed'])
             if key not in current_arch_trajectory_points: current_arch_trajectory_points[key] = {}
-            # Store index to map to transformed_weights later
-            # The index will be its position in the filtered current_arch_weights_list
-            item_index_in_filtered_list = -1
-            for idx, item_meta in enumerate(current_arch_pca_metadata):
-                if item_meta is meta: # Check for object identity
-                    item_index_in_filtered_list = idx
-                    break
-            current_arch_trajectory_points[key][meta['state'].lower() + '_idx'] = item_index_in_filtered_list
-
+            # Store the index relative to the filtered list (which will be the row in transformed_weights)
+            current_arch_trajectory_points[key][meta['state'].lower() + '_idx'] = idx
 
         print(f"  Performing PCA on {weights_matrix.shape[0]} weight vectors of dimension {weights_matrix.shape[1]} for {arch_name}...")
         pca = PCA(n_components=2, random_state=42)
@@ -274,53 +268,47 @@ def main():
             print(f"  PCA failed for {arch_name}: {e}. Weight matrix shape: {weights_matrix.shape}. Skipping.")
             continue
         
-        # Populate trajectory_points with PCA coordinates using the stored indices
-        for (method, seed), point_indices_data in current_arch_trajectory_points.items():
-            if 'initial_idx' in point_indices_data and point_indices_data['initial_idx'] < len(transformed_weights):
-                idx = point_indices_data['initial_idx']
-                current_arch_trajectory_points[(method, seed)]['initial'] = (transformed_weights[idx, 0], transformed_weights[idx, 1])
-            if 'final_idx' in point_indices_data and point_indices_data['final_idx'] < len(transformed_weights):
-                idx = point_indices_data['final_idx']
-                current_arch_trajectory_points[(method, seed)]['final'] = (transformed_weights[idx, 0], transformed_weights[idx, 1])
+        # Populate trajectory_points with actual PCA coordinates using the stored indices
+        for (method, seed), point_data in current_arch_trajectory_points.items():
+            if 'initial_idx' in point_data:
+                idx = point_data['initial_idx']
+                if idx < len(transformed_weights):
+                    point_data['initial'] = (transformed_weights[idx, 0], transformed_weights[idx, 1])
+            if 'final_idx' in point_data:
+                idx = point_data['final_idx']
+                if idx < len(transformed_weights):
+                     point_data['final'] = (transformed_weights[idx, 0], transformed_weights[idx, 1])
 
         plt.figure(figsize=(14, 10))
         colors = {'MAML': '#1f77b4', 'Vanilla': '#ff7f0e'}
         markers = {'Initial': 'o', 'Final': 'x'}
         line_styles = {'MAML': ':', 'Vanilla': '--'}
-        plotted_legend_labels = set() # Use a set for faster lookups and unique entries
+        plotted_legend_labels = set()
 
-        # Plot scatter points explicitly for each category to ensure all are attempted
-        # Iterate through the original filtered metadata to maintain order and access all points
-        # that contributed to the PCA.
+        # More robust scatter plotting: iterate directly over the metadata of points included in PCA
         for idx, meta in enumerate(current_arch_pca_metadata):
             method = meta['method']
             state = meta['state']
-            seed = meta['seed']
-            
-            # Find the corresponding PCA coordinates from transformed_weights
-            # This idx corresponds to the row in weights_matrix and transformed_weights
             pc1 = transformed_weights[idx, 0]
             pc2 = transformed_weights[idx, 1]
-            
-            label_key = f"{method} {state}" # e.g., MAML Initial
+            label_key = f"{method} {state}"
 
             plt.scatter(pc1, pc2, 
                         color=colors[method], 
                         marker=markers[state],
                         s=120, alpha=0.8,
                         label=label_key if label_key not in plotted_legend_labels else None,
-                        zorder=3)
-            if label_key not in plotted_legend_labels:
-                plotted_legend_labels.add(label_key)
+                        zorder=3) # Points on top
+            plotted_legend_labels.add(label_key) # Add to set after attempting to plot
         
-        # Draw trajectory lines using the populated current_arch_trajectory_points
+        # Draw trajectory lines (this part should be mostly fine)
         for (method, seed), points_data in current_arch_trajectory_points.items():
             if 'initial' in points_data and 'final' in points_data:
                 initial_pt = points_data['initial']
                 final_pt = points_data['final']
                 plt.plot([initial_pt[0], final_pt[0]], [initial_pt[1], final_pt[1]],
                          linestyle=line_styles[method], color=colors[method],
-                         alpha=0.5, linewidth=1.5, zorder=2)
+                         alpha=0.5, linewidth=1.5, zorder=2) # Lines underneath points
         
         plt.title(f'PCA of Model Weights: {arch_name.upper()}', fontsize=16)
         plt.xlabel(f'Principal Component 1 (Explains {pca.explained_variance_ratio_[0]:.2%} variance)', fontsize=12)
@@ -330,15 +318,10 @@ def main():
         handles, labels = plt.gca().get_legend_handles_labels()
         if handles:
             legend_order = ["MAML Initial", "MAML Final", "Vanilla Initial", "Vanilla Final"]
-            # Create a dictionary for fast lookup of desired order
             order_map = {label: i for i, label in enumerate(legend_order)}
-            # Sort existing handles and labels based on the desired order
-            # Put items not in legend_order at the end.
             sorted_legend_elements = sorted(zip(handles, labels), key=lambda hl_pair: order_map.get(hl_pair[1], float('inf')))
-            
             final_handles = [h for h, l in sorted_legend_elements]
             final_labels = [l for h, l in sorted_legend_elements]
-
             if final_handles:
                  plt.legend(final_handles, final_labels, title="Weight Group", fontsize=10, title_fontsize=12, loc='best')
 
