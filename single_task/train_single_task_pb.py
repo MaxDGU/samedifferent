@@ -47,15 +47,17 @@ class PBDataset(Dataset):
                 file_paths_to_try.append(os.path.join(self.data_dir, primary_filename))
 
                 # If we are initializing for the 'train' split, also add corresponding _val.h5 files for augmentation
-                if self.split == 'train':
-                    val_augment_filename = f"{task_name}_support{support_size}_val.h5"
-                    file_paths_to_try.append(os.path.join(self.data_dir, val_augment_filename))
+                # REMOVED: No longer augment train split with val split data to prevent leakage
+                # if self.split == 'train':
+                #     val_augment_filename = f"{task_name}_support{support_size}_val.h5"
+                #     file_paths_to_try.append(os.path.join(self.data_dir, val_augment_filename))
             
             # Remove duplicates that could arise if split='val' (primary and augment would be same)
             unique_file_paths = sorted(list(set(file_paths_to_try)))
 
-            if self.split == 'train':
-                print(f"Task {task_name} (train split): Will attempt to load from {len(unique_file_paths)} HDF5 sources (combining _{self.split}.h5 and potentially _val.h5 variants)...")
+            # if self.split == 'train': # Modified this logging
+            #    print(f"Task {task_name} (train split): Will attempt to load from {len(unique_file_paths)} HDF5 sources (combining _{self.split}.h5 and potentially _val.h5 variants)...")
+            print(f"Task {task_name} (split: {self.split}): Will attempt to load from {len(unique_file_paths)} HDF5 source(s): {unique_file_paths}")
 
             for filepath in unique_file_paths:
                 if not os.path.exists(filepath):
@@ -312,16 +314,20 @@ def main():
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate.')
     parser.add_argument('--data_dir', type=str, default='data/meta_h5/pb', help='Directory containing HDF5 task files.')
     parser.add_argument('--output_dir', type=str, default='results/single_task_test', help='Directory to save results and models.')
+    parser.add_argument('--output_seed_idx', type=int, required=True, help='Seed index (0-9) to use for naming the output subfolder.')
     parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping.')
     parser.add_argument('--val_freq', type=int, default=5, help='Frequency (in epochs) to run validation.')
+    # Add arguments for improvement_threshold, weight_decay that were previously hardcoded or missing
+    parser.add_argument('--improvement_threshold', type=float, default=0.005, help='Minimum improvement in val_acc to reset patience.')
+    parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for Adam optimizer.')
 
     args = parser.parse_args()
 
     print(f"Using device: {device.type}") # This is fine now
 
     # Ensure output directory exists
-    # Save under task_name/architecture/seed_X
-    specific_output_dir = Path(args.output_dir) / args.task / args.architecture / f"seed_{args.seed}"
+    # Save under task_name/architecture/seed_X (using output_seed_idx)
+    specific_output_dir = Path(args.output_dir) / args.task / args.architecture / f"seed_{args.output_seed_idx}"
     specific_output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Saving results to: {specific_output_dir}")
 
@@ -358,7 +364,7 @@ def main():
     print(f"Saved initial model weights to {initial_model_path}")
     
     criterion = nn.BCEWithLogitsLoss() 
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scaler = torch.amp.GradScaler(enabled=(device.type == 'cuda')) # CORRECTED GradScaler
 
     best_val_acc = 0.0
@@ -383,7 +389,7 @@ def main():
             print(f"Epoch {epoch} [Val]   Avg Loss: {val_loss:.4f}, Avg Acc: {val_acc:.4f}")
 
             # Checkpointing and Early Stopping
-            if val_acc - best_val_acc > 0.005:
+            if val_acc - best_val_acc > args.improvement_threshold:
                 best_val_acc = val_acc
                 epochs_no_improve = 0
                 save_path = specific_output_dir / "best_model.pth"

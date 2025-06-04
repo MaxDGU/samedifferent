@@ -8,9 +8,9 @@ from pathlib import Path
 # Define tasks, architectures, and seeds
 PB_TASKS = ['regular', 'lines', 'open', 'wider_line', 'scrambled',
             'random_color', 'arrows', 'irregular', 'filled', 'original']
-ARCHITECTURES = ['conv2', 'conv4', 'conv6']
+ARCHITECTURES = ['conv6']
 # Use 10 seeds
-SEEDS = list(range(10)) # Seeds 0 through 9
+SEEDS = list(range(5)) # Modified for subset run (seeds 0-4)
 
 # --- SLURM Script Template ---
 def create_array_script(output_base_dir, base_code_dir, data_dir):
@@ -85,16 +85,19 @@ OUTPUT_DIR="{output_base_dir}"
 # For now, let's pass globally_unique_seed and the folders will be like seed_0, seed_1, ... seed_10, seed_11 ...
 
 echo "Running job for task=$TASK arch=$ARCH original_seed_run_idx=$ORIGINAL_SEED_VAL (passed as --seed $globally_unique_seed to script)"
-python ${{BASE_CODE_DIR}}/train_single_task_pb.py \\
-    --task $TASK \\
-    --architecture $ARCH \\
-    --seed $globally_unique_seed \\
-    --data_dir $DATA_DIR \\
-    --output_dir $OUTPUT_DIR \\
-    --epochs 200 \\
-    --patience 100 \\
-    --val_freq 300 \\
-    --improvement_threshold 0.01
+python ${{BASE_CODE_DIR}}/train_single_task_pb.py \
+    --task $TASK \
+    --architecture $ARCH \
+    --seed $globally_unique_seed \
+    --output_seed_idx $ORIGINAL_SEED_VAL \
+    --data_dir $DATA_DIR \
+    --output_dir $OUTPUT_DIR \
+    --epochs 150 \
+    --patience 20 \
+    --val_freq 5 \
+    --improvement_threshold 0.005 \
+    --lr 0.0001 \
+    --weight_decay 1e-5
 
 echo "Job finished for task=$TASK arch=$ARCH original_seed_run_idx=$ORIGINAL_SEED_VAL (passed as --seed $globally_unique_seed)"
 """
