@@ -32,10 +32,10 @@ PB_TASKS=('regular' 'lines' 'open' 'wider_line' 'scrambled' 'random_color' 'arro
 
 # --- Training Parameters ---
 SINGLETASK_TRAIN_SCRIPT_PATH="${CODE_ROOT_DIR}/single_task/train_single_task_pb.py" 
-SINGLETASK_NUM_EPOCHS=10 
+SINGLETASK_NUM_EPOCHS=150 # Increased from 10
 SINGLETASK_BATCH_SIZE=32
 SINGLETASK_LR=0.001
-SINGLETASK_PATIENCE=10 
+SINGLETASK_PATIENCE=30 # Increased from 10
 SINGLETASK_VAL_FREQ=5  
 
 MAML_TRAIN_SCRIPT_PATH="${CODE_ROOT_DIR}/all_tasks/experiment_all_tasks_fomaml.py" 
@@ -113,6 +113,9 @@ echo "    Using MAML Epochs: ${MAML_NUM_EPOCHS}, Meta-Batches/Epoch: ${MAML_NUM_
 MAML_RUN_LOG_TEMP=$(mktemp)
 echo "Capturing MAML run output to ${MAML_RUN_LOG_TEMP}"
 
+echo "DEBUG: Executing MAML command:"
+echo "${PYTHON_EXEC} ${MAML_TRAIN_SCRIPT_PATH} --architecture \"${ARCH}\" --seed \"${SEED_VAL}\" --epochs \"${MAML_NUM_EPOCHS}\" --num_meta_batches_per_epoch \"${MAML_NUM_ADAPTATION_SAMPLES}\" --meta_batch_size \"${MAML_META_BATCH_SIZE}\" --inner_lr \"${MAML_LR}\" --outer_lr 0.0001 --adaptation_steps_train \"${MAML_ADAPTATION_STEPS}\" --adaptation_steps_val 15 --adaptation_steps_test 15 --first_order --output_base_dir \"${MAML_RESULTS_ROOT}\" --data_dir \"${HDF5_DATA_DIR}\" --track_bn_stats"
+
 ( ${PYTHON_EXEC} ${MAML_TRAIN_SCRIPT_PATH} \
     --architecture "${ARCH}" \
     --seed "${SEED_VAL}" \
@@ -121,7 +124,8 @@ echo "Capturing MAML run output to ${MAML_RUN_LOG_TEMP}"
     --meta_batch_size "${MAML_META_BATCH_SIZE}" \
     --inner_lr "${MAML_LR}" \
     --outer_lr 0.0001 \
-    --adaptation_steps "${MAML_ADAPTATION_STEPS}" \
+    --adaptation_steps_train "${MAML_ADAPTATION_STEPS}" \
+    --adaptation_steps_val 15 \
     --adaptation_steps_test 15 \
     --first_order \
     --output_base_dir "${MAML_RESULTS_ROOT}" \

@@ -25,84 +25,93 @@ class PBDataset(Dataset):
     """Dataset for PB tasks with balanced task representation."""
     def __init__(self, data_dir, task_names, split='train', support_sizes=[4, 6, 8, 10], transform=None):
         self.data_dir = data_dir
-        # Ensure task_names is always a list
         self.task_names = task_names if isinstance(task_names, list) else [task_names]
         self.split = split
         self.support_sizes = support_sizes
         self.transform = transform
         
-        # Dictionary to store data per task
         self.task_data = {task: {'images': [], 'labels': []} for task in self.task_names}
         
-        # Process each task separately
-        total_loaded_images = 0
+        total_loaded_images_across_all_tasks = 0
+        active_tasks = [] # Keep track of tasks for which data was actually loaded
+
         for task_name in self.task_names:
-            task_loaded_images = 0
-            # Process each support size
-            for support_size in support_sizes:
-                filename = f"{task_name}_support{support_size}_{split}.h5"
-                filepath = os.path.join(data_dir, filename)
-                
+            images_for_current_task = []
+            labels_for_current_task = []
+            task_has_data = False
+
+            file_paths_to_try = []
+            for support_size in self.support_sizes:
+                # Add the primary file for the current split (e.g., _train.h5, _val.h5, _test.h5)
+                primary_filename = f"{task_name}_support{support_size}_{self.split}.h5"
+                file_paths_to_try.append(os.path.join(self.data_dir, primary_filename))
+
+                # If we are initializing for the 'train' split, also add corresponding _val.h5 files for augmentation
+                if self.split == 'train':
+                    val_augment_filename = f"{task_name}_support{support_size}_val.h5"
+                    file_paths_to_try.append(os.path.join(self.data_dir, val_augment_filename))
+            
+            # Remove duplicates that could arise if split='val' (primary and augment would be same)
+            unique_file_paths = sorted(list(set(file_paths_to_try)))
+
+            if self.split == 'train':
+                print(f"Task {task_name} (train split): Will attempt to load from {len(unique_file_paths)} HDF5 sources (combining _{self.split}.h5 and potentially _val.h5 variants)...")
+
+            for filepath in unique_file_paths:
                 if not os.path.exists(filepath):
-                    print(f"Warning: File not found: {filepath}")
+                    if self.split == 'train' and '_val.h5' in os.path.basename(filepath) and f'_{self.split}.h5' not in os.path.basename(filepath):
+                        print(f"Info: Optional validation data file for training augmentation not found: {filepath}")
+                    # else: A missing primary file (_train.h5 for train, _val.h5 for val, etc.) is a more significant warning/error if it leads to no data for the task.
+                    # The check `if not task_has_data:` later will handle if no data is loaded at all.
                     continue
                 
-                # print(f"Loading {filename}") # Less verbose logging
                 try:
                     with h5py.File(filepath, 'r') as f:
-                        # Check if keys exist before accessing
-                        if 'support_images' not in f or 'support_labels' not in f or \
-                           'query_images' not in f or 'query_labels' not in f:
-                            print(f"Warning: Skipping {filepath} due to missing keys.")
+                        if not all(k in f for k in ['support_images', 'support_labels', 'query_images', 'query_labels']):
+                            print(f"Warning: Skipping {filepath} due to missing one or more required HDF5 keys.")
                             continue
 
                         num_episodes = f['support_images'].shape[0]
-                        
                         for episode_idx in range(num_episodes):
-                            support_images = f['support_images'][episode_idx]
-                            support_labels = f['support_labels'][episode_idx]
-                            query_images = f['query_images'][episode_idx]
-                            query_labels = f['query_labels'][episode_idx]
+                            s_imgs = f['support_images'][episode_idx]
+                            s_lbls = f['support_labels'][episode_idx]
+                            q_imgs = f['query_images'][episode_idx]
+                            q_lbls = f['query_labels'][episode_idx]
                             
-                            all_images = np.concatenate([support_images, query_images])
-                            all_labels = np.concatenate([support_labels, query_labels])
+                            combined_imgs = np.concatenate([s_imgs, q_imgs])
+                            combined_lbls = np.concatenate([s_lbls, q_lbls])
                             
-                            self.task_data[task_name]['images'].extend(all_images)
-                            self.task_data[task_name]['labels'].extend(all_labels)
-                            task_loaded_images += len(all_images)
+                            images_for_current_task.extend(combined_imgs)
+                            labels_for_current_task.extend(combined_lbls)
+                            task_has_data = True # Mark that we've successfully loaded some data for this task
                 except Exception as e:
-                     print(f"Error loading {filepath}: {e}")
-                     continue # Skip problematic files
+                     print(f"Error loading data from {filepath}: {e}")
+                     continue
             
-            if not self.task_data[task_name]['images']:
-                print(f"Warning: No images loaded for task {task_name} in split {split}. Check HDF5 files.")
-                # Remove task if no data was loaded to avoid errors later
-                del self.task_data[task_name]
-                self.task_names.remove(task_name)
-                continue
+            if task_has_data:
+                self.task_data[task_name]['images'] = np.array(images_for_current_task)
+                self.task_data[task_name]['labels'] = np.array(labels_for_current_task)
+                current_task_image_count = len(images_for_current_task)
+                total_loaded_images_across_all_tasks += current_task_image_count
+                active_tasks.append(task_name)
+                
+                print(f"Loaded {current_task_image_count} images in total for task {task_name} (split: {self.split})")
+                unique_labels_vals, counts = np.unique(self.task_data[task_name]['labels'].astype(int), return_counts=True)
+                label_dist_str = ", ".join([f"Label {l}: {c}" for l, c in zip(unique_labels_vals, counts)])
+                print(f"  Task {task_name} ({self.split}) Final Label Distribution: {label_dist_str}")
+                if len(unique_labels_vals) == 0:
+                    print(f"  ERROR: Task {task_name} ({self.split}) has NO labels loaded despite task_has_data being true. This is an issue.")
+                elif len(unique_labels_vals) == 1:
+                    print(f"  WARNING: Task {task_name} ({self.split}) has only one class label: {unique_labels_vals[0]}")
+            else:
+                print(f"Warning: No images loaded for task {task_name} (split: {self.split}) after attempting all sources. This task will be skipped.")
+                del self.task_data[task_name] # Remove task if no data loaded
 
-            # Convert to numpy arrays
-            self.task_data[task_name]['images'] = np.array(self.task_data[task_name]['images'])
-            self.task_data[task_name]['labels'] = np.array(self.task_data[task_name]['labels'])
-            
-            print(f"Loaded {task_loaded_images} images for task {task_name} ({split})")
-            # print(f"Label distribution: {np.bincount(self.task_data[task_name]['labels'].astype(int))}") # Old commented out
-            # New detailed label logging
-            unique_labels, counts = np.unique(self.task_data[task_name]['labels'].astype(int), return_counts=True)
-            label_dist_str = ", ".join([f"Label {l}: {c}" for l, c in zip(unique_labels, counts)])
-            print(f"  Task {task_name} ({split}) Label Distribution: {label_dist_str}")
-            if len(unique_labels) == 1:
-                print(f"  WARNING: Task {task_name} ({split}) has only one class label: {unique_labels[0]}")
-            elif len(unique_labels) == 0:
-                print(f"  ERROR: Task {task_name} ({split}) has NO labels loaded.")
-            # End new detailed label logging
-            total_loaded_images += task_loaded_images
-            
-        if not self.task_data:
-             raise ValueError(f"No data loaded for any specified tasks in split {split}.")
+        self.task_names = active_tasks # Update task_names to only include tasks with data
+        if not self.task_names:
+             raise ValueError(f"No data loaded for ANY specified tasks in split {self.split} after attempting all sources. Check HDF5 files and paths.")
 
-        # Calculate total size and samples per task per batch
-        self.total_size = total_loaded_images
+        self.total_size = total_loaded_images_across_all_tasks
         # Use min only if there are multiple tasks, otherwise use the size of the single task
         if len(self.task_names) > 1:
             self.samples_per_task = min(len(data['images']) for data in self.task_data.values() if data['images'].size > 0)
@@ -111,7 +120,7 @@ class PBDataset(Dataset):
         else: # Should not happen due to earlier check, but for safety
              self.samples_per_task = 0
 
-        print(f"Total images across loaded tasks ({split}): {self.total_size}")
+        print(f"Total images across loaded tasks ({self.split}): {self.total_size}")
         
         # Create indices for balanced sampling (or just indices for single task)
         self.task_indices = {

@@ -91,10 +91,10 @@ python ${{BASE_CODE_DIR}}/train_single_task_pb.py \\
     --seed $globally_unique_seed \\
     --data_dir $DATA_DIR \\
     --output_dir $OUTPUT_DIR \\
-    --epochs 100 \\
-    --patience 10 \\
-    --val_freq 5 \\
-    --improvement_threshold 0.005
+    --epochs 200 \\
+    --patience 100 \\
+    --val_freq 300 \\
+    --improvement_threshold 0.01
 
 echo "Job finished for task=$TASK arch=$ARCH original_seed_run_idx=$ORIGINAL_SEED_VAL (passed as --seed $globally_unique_seed)"
 """
