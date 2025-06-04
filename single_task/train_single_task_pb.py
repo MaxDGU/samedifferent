@@ -308,30 +308,28 @@ def main():
     # Add arguments (task, architecture, seed, epochs, batch_size, lr, data_dir, output_dir, patience, val_freq)
     parser.add_argument('--task', type=str, required=True, help='Name of the PB task to train on.')
     parser.add_argument('--architecture', type=str, required=True, choices=['conv2', 'conv4', 'conv6'], help='Model architecture.')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed.')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed for RNG (e.g., PyTorch, NumPy).')
     parser.add_argument('--epochs', type=int, default=100, help='Number of epochs to train.')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size.')
     parser.add_argument('--lr', type=float, default=0.001, help='Learning rate.')
     parser.add_argument('--data_dir', type=str, default='data/meta_h5/pb', help='Directory containing HDF5 task files.')
-    parser.add_argument('--output_dir', type=str, default='results/single_task_test', help='Directory to save results and models.')
-    parser.add_argument('--output_seed_idx', type=int, required=True, help='Seed index (0-9) to use for naming the output subfolder.')
+    parser.add_argument('--output_dir', type=str, default='results/single_task_test', help='Base directory to save results and models.')
+    parser.add_argument('--output_seed_idx', type=int, required=True, help='Seed index (0-9) to use for naming the output subfolder (e.g., seed_0, seed_1).')
     parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping.')
     parser.add_argument('--val_freq', type=int, default=5, help='Frequency (in epochs) to run validation.')
-    # Add arguments for improvement_threshold, weight_decay that were previously hardcoded or missing
     parser.add_argument('--improvement_threshold', type=float, default=0.005, help='Minimum improvement in val_acc to reset patience.')
     parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for Adam optimizer.')
 
     args = parser.parse_args()
 
-    print(f"Using device: {device.type}") # This is fine now
+    print(f"Using device: {device.type}")
 
-    # Ensure output directory exists
-    # Save under task_name/architecture/seed_X (using output_seed_idx)
+    # Ensure output directory exists using output_seed_idx for the specific seed run
     specific_output_dir = Path(args.output_dir) / args.task / args.architecture / f"seed_{args.output_seed_idx}"
     specific_output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Saving results to: {specific_output_dir}")
 
-    # Set seed for reproducibility
+    # Set RNG seed (this is args.seed, the globally_unique_seed from the Slurm script)
     set_seed(args.seed)
 
     # Load data
@@ -364,8 +362,9 @@ def main():
     print(f"Saved initial model weights to {initial_model_path}")
     
     criterion = nn.BCEWithLogitsLoss() 
+    # Use args.weight_decay in the optimizer
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scaler = torch.amp.GradScaler(enabled=(device.type == 'cuda')) # CORRECTED GradScaler
+    scaler = torch.amp.GradScaler(enabled=(device.type == 'cuda'))
 
     best_val_acc = 0.0
     epochs_no_improve = 0
@@ -388,7 +387,7 @@ def main():
             metrics_history['val_acc'].append(val_acc)
             print(f"Epoch {epoch} [Val]   Avg Loss: {val_loss:.4f}, Avg Acc: {val_acc:.4f}")
 
-            # Checkpointing and Early Stopping
+            # Checkpointing and Early Stopping using args.improvement_threshold
             if val_acc - best_val_acc > args.improvement_threshold:
                 best_val_acc = val_acc
                 epochs_no_improve = 0
