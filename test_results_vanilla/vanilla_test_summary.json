@@ -1,0 +1,38 @@
+{
+    "conv2lr": {
+        "accuracies": [
+            0.51625,
+            0.5040625,
+            0.51796875,
+            0.520625,
+            0.51625
+        ],
+        "mean_accuracy": 0.5150312499999999,
+        "std_accuracy": 0.005713197441013228,
+        "num_seeds_successful": 5
+    },
+    "conv4lr": {
+        "accuracies": [
+            0.505,
+            0.515,
+            0.50359375,
+            0.51546875,
+            0.510625
+        ],
+        "mean_accuracy": 0.5099375,
+        "std_accuracy": 0.004925816873879926,
+        "num_seeds_successful": 5
+    },
+    "conv6lr": {
+        "accuracies": [
+            0.53546875,
+            0.53375,
+            0.5471875,
+            0.54,
+            0.56265625
+        ],
+        "mean_accuracy": 0.5438125,
+        "std_accuracy": 0.010506043647586841,
+        "num_seeds_successful": 5
+    }
+}
