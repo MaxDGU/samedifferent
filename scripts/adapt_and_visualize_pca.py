@@ -87,7 +87,7 @@ def main():
     # Update default paths for the Della cluster environment
     parser.add_argument('--weights_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6',
                         help='Directory containing the pre-trained model weight files.')
-    parser.add_argument('--data_path', type=str, default='/scratch/gpfs/mg7411/samedifferent/data/naturalistic_new/meta/test.h5',
+    parser.add_argument('--data_path', type=str, default='/scratch/gpfs/mg7411/samedifferent/data/naturalistic/test.h5',
                         help='Path to the HDF5 file with the naturalistic meta-testing data.')
     parser.add_argument('--output_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/visualizations/adaptation_pca',
                         help='Directory where the PCA plot will be saved.')
