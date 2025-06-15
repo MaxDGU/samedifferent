@@ -33,7 +33,7 @@ class LazyHDF5Dataset(Dataset):
     but only loads samples into memory when requested by __getitem__.
     This is crucial for datasets that are too large to fit into RAM.
     """
-    def __init__(self, h5_path, transform=None):
+    def __init__(self, h5_path, transform=None, max_samples=None):
         self.h5_path = h5_path
         self.transform = transform
         self.file = None  # File handle will be opened in __getitem__ if not open
@@ -44,9 +44,14 @@ class LazyHDF5Dataset(Dataset):
             episode_keys = sorted([key for key in hf.keys() if key.startswith('episode_')])
             for key in episode_keys:
                 if 'support_images' in hf[key]:
-                    num_samples = hf[key]['support_images'].shape[0]
-                    for i in range(num_samples):
+                    num_samples_in_ep = hf[key]['support_images'].shape[0]
+                    for i in range(num_samples_in_ep):
                         self.index_map.append((key, i))
+                        # Stop if we've reached the maximum number of samples
+                        if max_samples is not None and len(self.index_map) >= max_samples:
+                            break
+                if max_samples is not None and len(self.index_map) >= max_samples:
+                    break
 
     def __len__(self):
         return len(self.index_map)
@@ -97,6 +102,8 @@ def main():
                         help='Number of adaptation epochs over the support set.')
     parser.add_argument('--adaptation_batch_size', type=int, default=128,
                         help='Batch size for the adaptation phase.')
+    parser.add_argument('--max_adaptation_samples', type=int, default=5000,
+                        help='Maximum number of support samples to use for adaptation.')
 
     args = parser.parse_args()
 
@@ -119,6 +126,7 @@ def main():
     adaptation_lr = args.lr
     adaptation_steps = args.steps
     adaptation_batch_size = args.adaptation_batch_size
+    max_adaptation_samples = args.max_adaptation_samples
     num_seeds_start = 3
     num_seeds_end = 10 # range goes up to, but does not include, this value
 
@@ -133,9 +141,9 @@ def main():
         T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     
-    # Instantiate the lazy dataset
-    support_dataset = LazyHDF5Dataset(data_path, transform=transform)
-    print(f"  Found a total of {len(support_dataset)} support images across all episodes.")
+    # Instantiate the lazy dataset, limiting the number of samples
+    support_dataset = LazyHDF5Dataset(data_path, transform=transform, max_samples=max_adaptation_samples)
+    print(f"  Found a total of {len(support_dataset)} support images for adaptation.")
 
     # Create a DataLoader for batching. num_workers must be 0 for this h5py implementation.
     support_loader = DataLoader(support_dataset, batch_size=adaptation_batch_size, shuffle=True, num_workers=0)
@@ -177,8 +185,10 @@ def main():
         initial_weights = flatten_weights(model.state_dict())
         initial_weights_vectors.append(initial_weights)
 
+        # 2. Adapt the model
         model.to(device)
-        maml = l2l.algorithms.MAML(model, lr=adaptation_lr, first_order=False)
+        # Use first_order=True to significantly reduce memory consumption
+        maml = l2l.algorithms.MAML(model, lr=adaptation_lr, first_order=True)
 
         # 3. Adapt on Naturalistic Data using batches
         print(f"  Adapting model for {adaptation_steps} epoch(s) with batch size {adaptation_batch_size}...")
