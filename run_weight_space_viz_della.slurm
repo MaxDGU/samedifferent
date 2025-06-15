@@ -17,12 +17,8 @@ conda activate tensorflow
 mkdir -p /scratch/gpfs/mg7411/samedifferent/visualizations
 
 # Run the visualization script
-# The script now takes multiple output arguments for pca and tsne
+# The script now takes a single output directory
 python -u scripts/visualize_weight_space.py \
-    --base_dir /scratch/gpfs/mg7411/samedifferent \
-    --vanilla_pb_dir /scratch/gpfs/mg7411/samedifferent/results/pb_baselines \
-    --vanilla_nat_dir /scratch/gpfs/mg7411/samedifferent/logs_naturalistic_vanilla \
-    --output_pca /scratch/gpfs/mg7411/samedifferent/visualizations/weights_pca_all.png \
-    --output_tsne /scratch/gpfs/mg7411/samedifferent/visualizations/weights_tsne_all.png
+    --output_dir /scratch/gpfs/mg7411/samedifferent/visualizations
 
 echo "Visualization job finished." 
