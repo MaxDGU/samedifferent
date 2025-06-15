@@ -10,7 +10,7 @@
 # Load required modules
 module purge
 module load anaconda3/2023.9
-module load cuda/11.7.0
+module load cuda/11.8
 conda activate tensorflow
 
 # Ensure the visualizations directory exists

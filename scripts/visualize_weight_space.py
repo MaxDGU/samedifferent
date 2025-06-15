@@ -76,9 +76,9 @@ def main(args):
 
     # Dynamically import model classes from baselines
     try:
-        from baselines.models.conv2 import SameDifferentCNN as ConvNet2LR
-        from baselines.models.conv4 import SameDifferentCNN as ConvNet4LR
-        from baselines.models.conv6 import SameDifferentCNN as ConvNet6LR
+        from baselines.models.conv2 import ConvNet2LR
+        from baselines.models.conv4 import ConvNet4LR
+        from baselines.models.conv6 import ConvNet6LR
         model_classes = {
             'Conv2': ConvNet2LR,
             'Conv4': ConvNet4LR,
@@ -102,23 +102,31 @@ def main(args):
 
             try:
                 model_class = model_classes[model_arch]
-                model = model_class() if model_arch == 'Conv2' else model_class(num_classes=2)
+                
+                # Correctly instantiate models.
+                if model_arch in ['Conv4', 'Conv6']:
+                    model = model_class(num_classes=2)
+                else:
+                    model = model_class()
                 
                 device = torch.device("cpu")
                 model.to(device)
                 
-                state_dict = torch.load(path, map_location=device)
+                checkpoint = torch.load(path, map_location=device)
                 
-                # Handle various checkpointing formats
-                if 'model' in state_dict and isinstance(state_dict['model'], dict):
-                    model.load_state_dict(state_dict['model'])
-                elif 'state_dict' in state_dict and isinstance(state_dict['state_dict'], dict):
-                    model.load_state_dict(state_dict['state_dict'])
-                elif 'net' in state_dict and isinstance(state_dict['net'], dict):
-                    new_state_dict = {k.replace('net.', ''): v for k, v in state_dict['net'].items()}
-                    model.load_state_dict(new_state_dict)
+                state_dict = None
+                if 'model_state_dict' in checkpoint:
+                    state_dict = checkpoint['model_state_dict']
+                elif 'state_dict' in checkpoint:
+                    state_dict = checkpoint['state_dict']
+                elif 'net' in checkpoint:
+                    state_dict = {k.replace('net.', ''): v for k, v in checkpoint['net'].items()}
+                elif 'model' in checkpoint:
+                    state_dict = checkpoint['model']
                 else:
-                    model.load_state_dict(state_dict)
+                    state_dict = checkpoint
+                
+                model.load_state_dict(state_dict)
 
                 flat_weights = flatten_weights(model)
                 all_weights.append(flat_weights)
