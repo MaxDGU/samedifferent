@@ -88,20 +88,20 @@ def main(args):
     # A list of tuples: (Group Label, Architecture Label, Model Class, Path, strict_loading)
     models_to_compare = [
         # MAML Models
-        ("PB-MAML", "conv2", PB_Hybrid_CNN, f"{args.base_dir}/exp1_conv2lr_runs_20250125_111902/seed_4/model_seed_4_pretesting.pt", False),
-        ("PB-MAML", "conv4", PB_Hybrid_CNN, f"{args.base_dir}/exp1_(finished)conv4lr_runs_20250126_201548/seed_4/model_seed_4_pretesting.pt", False),
-        ("PB-MAML", "conv6", PB_Hybrid_CNN, f"{args.base_dir}/maml_pbweights_conv6/model_seed_4_pretesting.pt", False),
-        ("Nat-MAML", "conv2", Conv2CNN, f"{args.base_dir}/naturalistic/results_meta_della/conv2lr/seed_4/conv2lr_best.pth", True),
-        ("Nat-MAML", "conv4", Conv4CNN, f"{args.base_dir}/naturalistic/results_meta_della/conv4lr/seed_4/conv4lr_best.pth", True),
-        ("Nat-MAML", "conv6", Conv6CNN, f"{args.base_dir}/naturalistic/results_meta_della/conv6lr/seed_4/conv6lr_best.pth", True),
+        ("PB-MAML", "conv2", PB_Hybrid_CNN, f"{args.base_dir}/exp1_conv2lr_runs_20250125_111902/seed_42/model_seed_42_pretesting.pt", False),
+        ("PB-MAML", "conv4", PB_Hybrid_CNN, f"{args.base_dir}/exp1_(finished)conv4lr_runs_20250126_201548/seed_42/model_seed_42_pretesting.pt", False),
+        ("PB-MAML", "conv6", PB_Hybrid_CNN, f"{args.base_dir}/maml_pbweights_conv6/model_seed_42_pretesting.pt", False),
+        ("Nat-MAML", "conv2", Conv2CNN, f"{args.base_dir}/naturalistic/results_meta_della/conv2lr/seed_42/conv2lr_best.pth", True),
+        ("Nat-MAML", "conv4", Conv4CNN, f"{args.base_dir}/naturalistic/results_meta_della/conv4lr/seed_42/conv4lr_best.pth", True),
+        ("Nat-MAML", "conv6", Conv6CNN, f"{args.base_dir}/naturalistic/results_meta_della/conv6lr/seed_42/conv6lr_best.pth", True),
         
         # Vanilla SGD Models (PB temporarily disabled)
-        # ("PB-Vanilla", "conv2", Conv2CNN, f"{args.vanilla_pb_dir}/all_tasks/conv2/test_regular/seed_47/best_model.pt", True),
-        # ("PB-Vanilla", "conv4", Conv4CNN, f"{args.vanilla_pb_dir}/all_tasks/conv4/test_regular/seed_47/best_model.pt", True),
-        # ("PB-Vanilla", "conv6", Conv6CNN, f"{args.vanilla_pb_dir}/all_tasks/conv6/test_regular/seed_47/best_model.pt", True),
-        ("Nat-Vanilla", "conv2", Conv2CNN, f"{args.vanilla_nat_dir}/conv2lr/seed_47/best_model.pt", True),
-        ("Nat-Vanilla", "conv4", Conv4CNN, f"{args.vanilla_nat_dir}/conv4lr/seed_47/best_model.pt", True),
-        ("Nat-Vanilla", "conv6", Conv6CNN, f"{args.vanilla_nat_dir}/conv6lr/seed_47/best_model.pt", True),
+        # ("PB-Vanilla", "conv2", Conv2CNN, f"{args.vanilla_pb_dir}/all_tasks/conv2/test_regular/seed_42/best_model.pt", True),
+        # ("PB-Vanilla", "conv4", Conv4CNN, f"{args.vanilla_pb_dir}/all_tasks/conv4/test_regular/seed_42/best_model.pt", True),
+        # ("PB-Vanilla", "conv6", Conv6CNN, f"{args.vanilla_pb_dir}/all_tasks/conv6/test_regular/seed_42/best_model.pt", True),
+        ("Nat-Vanilla", "conv2", Conv2CNN, f"{args.vanilla_nat_dir}/conv2lr/seed_42/best_model.pt", True),
+        ("Nat-Vanilla", "conv4", Conv4CNN, f"{args.vanilla_nat_dir}/conv4lr/seed_42/best_model.pt", True),
+        ("Nat-Vanilla", "conv6", Conv6CNN, f"{args.vanilla_nat_dir}/conv6lr/seed_42/best_model.pt", True),
     ]
 
     all_weights = []

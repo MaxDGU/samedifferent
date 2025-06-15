@@ -10,8 +10,8 @@
 # Load required modules
 module purge
 module load anaconda3/2023.9
-module load cuda/11.7.0
-conda activate tensorflow
+module load cuda/11.7
+source activate /scratch/gpfs/mg7411/samedifferent/env/
 
 # Ensure the visualizations directory exists
 mkdir -p /scratch/gpfs/mg7411/samedifferent/visualizations
