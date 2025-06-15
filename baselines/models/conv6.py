@@ -16,7 +16,7 @@ from .utils import train_epoch, validate, EarlyStopping, train_model, SameDiffer
 
 
 class SameDifferentCNN(nn.Module):
-    def __init__(self):
+    def __init__(self, dropout_rate_fc=0.3):
         super(SameDifferentCNN, self).__init__()
         
         # First layer: 6x6 filters with 18 filters
@@ -53,9 +53,9 @@ class SameDifferentCNN(nn.Module):
         self.fc3 = nn.Linear(1024, 1024)
         
         # Dropouts for FC layers
-        self.dropout1 = nn.Dropout(0.3)
-        self.dropout2 = nn.Dropout(0.3)
-        self.dropout3 = nn.Dropout(0.3)
+        self.dropout1 = nn.Dropout(dropout_rate_fc)
+        self.dropout2 = nn.Dropout(dropout_rate_fc)
+        self.dropout3 = nn.Dropout(dropout_rate_fc)
         
         # Final classification layer
         self.classifier = nn.Linear(1024, 2)
@@ -124,7 +124,13 @@ class SameDifferentCNN(nn.Module):
 def main(args):
     """Main entry point for training Conv6 model."""
     args.dataset_class = SameDifferentDataset
-    train_model(SameDifferentCNN, args)
+    # Assuming model needs dropout_rate_fc if provided, else uses default.
+    # This main is for testing model structure, not part of PB pipeline direct call.
+    model_instance = SameDifferentCNN() # Default dropout for standalone test
+    if hasattr(args, 'dropout_rate_fc'):
+        model_instance = SameDifferentCNN(dropout_rate_fc=args.dropout_rate_fc)
+    
+    train_model(model_instance, args) # Pass model instance
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

@@ -199,7 +199,6 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
     total_meta_acc = 0
     num_meta_batches_processed = 0
     
-    # For Debugging
     current_arch = args.architecture
     if epoch_num == 0 and current_arch in ['conv4', 'conv6'] :
         print_debug_stats("TrainEpochStart", current_arch, epoch_num, 0, maml_model=maml)
@@ -213,6 +212,7 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
         
         actual_meta_batch_size = current_meta_batch_data['support_images'].size(0)
         if actual_meta_batch_size == 0:
+            print(f"Warning: Meta-batch {meta_batch_idx} has 0 tasks. Skipping.")
             continue
 
         for task_idx in range(actual_meta_batch_size):
@@ -225,6 +225,7 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
             query_labels = current_meta_batch_data['query_labels'][task_idx].to(device, non_blocking=True)
 
             # Adaptation Phase
+            task_adaptation_failed = False
             for adapt_step in range(adaptation_steps):
                 with torch.amp.autocast(device_type=device.type, enabled=scaler is not None):
                     support_preds = learner(support_images)
@@ -234,12 +235,26 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
                 print_debug_stats("AdaptStepPreLoss", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, adapt_step=adapt_step, support_preds=support_preds, support_loss=support_loss, learner=learner)
                 
                 if torch.isnan(support_loss) or torch.isinf(support_loss):
-                    print(f"CRITICAL: NaN/Inf support_loss detected. Arch: {current_arch}, E{epoch_num} B{meta_batch_idx} T{task_idx} AS{adapt_step}. Loss: {support_loss.item()}. Skipping adapt for this step.")
+                    print(f"CRITICAL: NaN/Inf support_loss detected. Arch: {current_arch}, E{epoch_num} B{meta_batch_idx} T{task_idx} AS{adapt_step}. Loss: {support_loss.item()}. Skipping adapt for this step and task.")
+                    task_adaptation_failed = True
                     break 
                 
                 learner.adapt(support_loss, allow_unused=True, allow_nograd=True)
                 print_debug_stats("AdaptStepPostAdapt", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, adapt_step=adapt_step, learner=learner)
+            
+            if task_adaptation_failed:
+                # If adaptation failed for this task, we cannot evaluate it.
+                # We'll add a very high loss and zero accuracy for this task to penalize,
+                # or simply skip its contribution to the meta-loss.
+                # For now, let's skip its contribution to avoid NaNs in meta-loss if we assigned a fixed large loss.
+                # Effective meta_batch_size for averaging will be smaller if tasks fail.
+                # This needs careful consideration: should a failed task contribute a max loss or be ignored?
+                # Ignoring it might be too lenient. Let's add a large loss and 0 acc to make it count.
+                print(f"Warning: Task {task_idx} adaptation failed. Assigning high loss and 0 acc.")
+                query_loss_for_task = torch.tensor(100.0, device=device) # Arbitrary large loss
+                acc = 0.0
             else: 
+                # Evaluation Phase (Query Set)
                 with torch.amp.autocast(device_type=device.type, enabled=scaler is not None):
                     query_preds = learner(query_images)
                     query_loss_for_task = F.binary_cross_entropy_with_logits(
@@ -248,49 +263,58 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
                 print_debug_stats("QueryPhase", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, query_preds=query_preds, query_loss=query_loss_for_task, learner=learner)
 
                 if torch.isnan(query_loss_for_task) or torch.isinf(query_loss_for_task):
-                    print(f"CRITICAL: NaN/Inf query_loss_for_task. Arch: {current_arch}, E{epoch_num} B{meta_batch_idx} T{task_idx}. Loss: {query_loss_for_task.item()}. This task's loss not included.")
+                    print(f"CRITICAL: NaN/Inf query_loss_for_task. Arch: {current_arch}, E{epoch_num} B{meta_batch_idx} T{task_idx}. Loss: {query_loss_for_task.item()}. Assigning high loss and 0 acc.")
+                    query_loss_for_task = torch.tensor(100.0, device=device) # Arbitrary large loss
+                    acc = 0.0
                 else:
-                    sum_query_losses_for_meta_batch += query_loss_for_task
-                    sum_query_accs_for_meta_batch += accuracy(query_preds.detach(), query_labels.long())
-
-        if actual_meta_batch_size > 0 and isinstance(sum_query_losses_for_meta_batch, torch.Tensor) and not (torch.isnan(sum_query_losses_for_meta_batch) or torch.isinf(sum_query_losses_for_meta_batch)):
-            avg_query_loss_for_meta_batch = sum_query_losses_for_meta_batch / actual_meta_batch_size
-            avg_query_acc_for_meta_batch = sum_query_accs_for_meta_batch / actual_meta_batch_size
+                    acc = accuracy(query_preds, query_labels)
             
-            # Clear gradients on MAML model before outer backward
-            # maml.zero_grad() # This is done by optimizer.zero_grad() already.
+            sum_query_losses_for_meta_batch += query_loss_for_task
+            sum_query_accs_for_meta_batch += acc
+            # End of per-task processing in meta-batch
+        
+        # Meta-update
+        meta_loss_for_batch = sum_query_losses_for_meta_batch / actual_meta_batch_size
+        meta_acc_for_batch = sum_query_accs_for_meta_batch / actual_meta_batch_size
 
-            if scaler is not None:
-                scaler.scale(avg_query_loss_for_meta_batch).backward()
-                print_debug_stats("PostOuterBackward", current_arch, epoch_num, meta_batch_idx, maml_model=maml) # Check MAML grads
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(maml.parameters(), max_norm=1.0)
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                avg_query_loss_for_meta_batch.backward()
-                print_debug_stats("PostOuterBackward", current_arch, epoch_num, meta_batch_idx, maml_model=maml) # Check MAML grads
-                torch.nn.utils.clip_grad_norm_(maml.parameters(), max_norm=1.0)
-                optimizer.step()
-            
-            print_debug_stats("PostOptimizerStep", current_arch, epoch_num, meta_batch_idx, maml_model=maml) # Check MAML weights
+        if torch.isnan(meta_loss_for_batch) or torch.isinf(meta_loss_for_batch):
+            print(f"CRITICAL: NaN/Inf meta_loss_for_batch detected before backward. Arch: {current_arch}, E{epoch_num} B{meta_batch_idx}. Loss: {meta_loss_for_batch.item()}. Skipping batch.")
+            optimizer.zero_grad(set_to_none=True) 
+            del sum_query_losses_for_meta_batch, meta_loss_for_batch 
+            gc.collect()
+            torch.cuda.empty_cache() if device.type == 'cuda' else None
+            continue 
 
-            total_meta_loss += avg_query_loss_for_meta_batch.item()
-            total_meta_acc += avg_query_acc_for_meta_batch.item() if isinstance(avg_query_acc_for_meta_batch, torch.Tensor) else avg_query_acc_for_meta_batch
-            num_meta_batches_processed += 1
-        elif isinstance(sum_query_losses_for_meta_batch, torch.Tensor) and (torch.isnan(sum_query_losses_for_meta_batch) or torch.isinf(sum_query_losses_for_meta_batch)):
-            print(f"CRITICAL: sum_query_losses_for_meta_batch is NaN/Inf for E{epoch_num} B{meta_batch_idx}. Arch: {current_arch}. Skipping meta-update.")
+        print_debug_stats("PreOuterBackward", current_arch, epoch_num, meta_batch_idx, maml_model=maml, query_loss=meta_loss_for_batch)
 
+        if scaler:
+            scaler.scale(meta_loss_for_batch).backward()
+            if args.grad_clip_norm is not None:
+                scaler.unscale_(optimizer) 
+                torch.nn.utils.clip_grad_norm_(maml.parameters(), args.grad_clip_norm)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            meta_loss_for_batch.backward()
+            if args.grad_clip_norm is not None:
+                torch.nn.utils.clip_grad_norm_(maml.parameters(), args.grad_clip_norm)
+            optimizer.step()
+        
+        print_debug_stats("PostOptimizerStep", current_arch, epoch_num, meta_batch_idx, maml_model=maml)
 
-        pbar.set_postfix({
-            'loss': f'{total_meta_loss / num_meta_batches_processed:.4f}' if num_meta_batches_processed > 0 else 'N/A',
-            'acc': f'{total_meta_acc / num_meta_batches_processed:.4f}' if num_meta_batches_processed > 0 else 'N/A'
-        })
-    
-    if num_meta_batches_processed == 0:
-        print(f"Warning: Epoch {epoch_num+1} completed with no meta-batches processed successfully for arch {current_arch}.")
-        return 0.0, 0.0 # Return 0 to avoid division by zero if no batches were processed
-    return total_meta_loss / num_meta_batches_processed, total_meta_acc / num_meta_batches_processed
+        total_meta_loss += meta_loss_for_batch.item()
+        total_meta_acc += meta_acc_for_batch # meta_acc_for_batch is already a float
+        num_meta_batches_processed += 1
+        
+        pbar.set_postfix(meta_loss=meta_loss_for_batch.item(), meta_acc=meta_acc_for_batch)
+
+    if num_meta_batches_processed == 0: # Handle case where all batches were skipped
+        print("Warning: No meta-batches processed in this epoch.")
+        return 0.0, 0.0 
+        
+    avg_meta_loss = total_meta_loss / num_meta_batches_processed
+    avg_meta_acc = total_meta_acc / num_meta_batches_processed
+    return avg_meta_loss, avg_meta_acc
 
 def validate_or_test(maml, dataloader, device, adaptation_steps, mode='Validating', epoch_num=None, test_task_name=None):
     maml.eval()
@@ -416,15 +440,15 @@ def main(args):
         json.dump(args_to_save, f, indent=4)
 
     # --- Model Selection ---
-    model_class = ARCHITECTURES.get(args.architecture)
-    if model_class is None:
+    model_constructor = ARCHITECTURES.get(args.architecture)
+    if model_constructor is None:
         raise ValueError(f"Unsupported architecture: {args.architecture}")
     
-    # model_class constructor (e.g., Conv2CNN_lr) does not take track_running_stats directly.
+    # model_constructor constructor (e.g., Conv2CNN_lr) does not take track_running_stats directly.
     # This property is set on BatchNorm2d layers within the model definition.
     # The args.track_running_stats_maml argument was intended to guide MAML behaviour,
     # but l2l.MAML handles BN differently based on model.train()/eval() modes.
-    model = model_class().to(device) 
+    model = model_constructor().to(device) 
     
     # Initialize weights (optional, but good practice)
     for m_init in model.modules():
@@ -450,8 +474,9 @@ def main(args):
         model,
         lr=effective_inner_lr, 
         first_order=args.first_order, 
-        allow_unused=True, # Explicitly True for safety, args.track_running_stats_maml was also True
-        allow_nograd=True 
+        allow_unused=True, 
+        allow_nograd=True,
+        track_running_stats=args.track_bn_stats # This is already correct
     )
     maml.to(device)
     optimizer = torch.optim.AdamW(maml.parameters(), lr=args.outer_lr, weight_decay=args.weight_decay)
@@ -558,7 +583,7 @@ def main(args):
             json.dump(metrics_history, f_metrics, indent=4)
 
         if patience_counter >= args.patience:
-            print(f"Early stopping triggered at epoch {epoch+1} due to no improvement in val acc for {args.patience} validation cycles.")
+            print(f"Early stopping triggered at epoch {epoch+1} due to no improvement in val_acc for {args.patience} validation cycles.")
             break
         
         # Clear CUDA cache
@@ -650,134 +675,66 @@ def main(args):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='MAML (FOMAML) training on all PB tasks with variable support sizes.')
-    
-    # Paths and Basic Setup
-    parser.add_argument('--data_dir', type=str, default='data/pb/pb', help='Directory for PB HDF5 data files.')
-    parser.add_argument('--output_base_dir', type=str, default='results_maml_all_tasks_Svar_Q3', help='Base directory to save experiment results.') # Updated default
+    parser = argparse.ArgumentParser(description='Run MAML training on all PB tasks with variable support sizes.')
+
+    # --- Paths and Basic Setup ---
+    parser.add_argument('--data_dir', type=str, default='data/meta_h5/pb', help='Directory for PB HDF5 data files.')
+    parser.add_argument('--output_base_dir', type=str, default='./results/maml_all_tasks', help='Base directory to save experiment results.')
     parser.add_argument('--architecture', type=str, required=True, choices=['conv2', 'conv4', 'conv6'], help='Model architecture.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed.')
-    parser.add_argument('--force_cpu', action='store_true', help='Force CPU even if CUDA is available.')
-    parser.add_argument('--num_workers', type=int, default=2, help='Number of workers for DataLoader.')
+    parser.add_argument('--force_cpu', action='store_true', help='Force CPU usage even if CUDA is available.')
+    parser.add_argument('--num_workers', type=int, default=0, help='Number of workers for DataLoader. 0 for main process.')
 
-    # MAML specific
-    parser.add_argument('--first_order', action='store_true', # Default is False (second-order MAML) if flag not present
-                        help='Use First-Order MAML (FOMAML). If not set, 2nd order MAML is used.')
-    # track_running_stats for the MAML model's Batch Norm layers.
-    # if True, BN layers will use running stats during maml.eval() / validation pass for query set.
-    # if False, BN layers will use batch stats from current query batch during maml.eval().
-    # During adaptation (inner loop), clone is in train() mode, so BN uses batch stats of support set.
-    # For testing, we set clone.train() for adaptation, then clone.eval() for query. This arg controls maml.eval()
-    parser.add_argument('--track_running_stats_maml', type=lambda x: (str(x).lower() == 'true'), default=True,
-                        help='Whether MAML model uses running stats in BatchNorm layers during meta-validation/testing. '
-                             'Set to False to use batch statistics from the query set instead during meta-val/test query eval. '
-                             'Adaptation always uses batch stats from support set.')
-
-
-    # Meta-learning parameters
-    parser.add_argument('--meta_batch_size', type=int, default=4, help='Number of tasks per meta-update (meta-batch size).')
-    parser.add_argument('--inner_lr', type=float, default=0.001, help='Inner loop learning rate (adaptation step size).') # Default matches run_all_tasks_pb.py
-    parser.add_argument('--outer_lr', type=float, default=0.0001, help='Outer loop learning rate (meta-optimizer step size).') # Default matches run_all_tasks_pb.py
-    parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for AdamW optimizer.') # Changed default to 0.0
+    # --- MAML specific ---
+    parser.add_argument('--first_order', action='store_true', help='Use First-Order MAML (FOMAML). If not set, 2nd order MAML is used.')
+    parser.add_argument('--track_bn_stats', action=argparse.BooleanOptionalAction, default=True, help='Track batch norm running statistics in MAML. Default is True for l2l.MAML wrapper.')
     
-    # Episode / Task construction (removed --support_size and --query_size for main training)
-    # These are now fixed internally (VARIABLE_SUPPORT_SIZES, FIXED_QUERY_SIZE)
-    # Test-specific S/Q sizes remain arguments:
+    # --- Meta-learning parameters ---
+    parser.add_argument('--meta_batch_size', type=int, default=16, help='Number of tasks per meta-update (meta-batch size).') # Adjusted default based on della_datapar
+    parser.add_argument('--inner_lr', type=float, default=0.001, help='Learning rate for inner loop adaptation (alpha).') # Matches della_datapar
+    parser.add_argument('--outer_lr', type=float, default=0.0001, help='Learning rate for outer loop meta-optimizer (beta).') # Matches della_datapar
+    parser.add_argument('--adaptation_steps_train', type=int, default=5, help='Number of adaptation steps for training (k_train).')
+    parser.add_argument('--adaptation_steps_val', type=int, default=15, help='Number of adaptation steps for validation (k_val).') # Matches della_datapar
+    parser.add_argument('--adaptation_steps_test', type=int, default=15, help='Number of adaptation steps for testing (k_test).') # Matches della_datapar
+    
+    # Note: VARIABLE_SUPPORT_SIZES and FIXED_QUERY_SIZE are hardcoded in the script for now.
+    # These could be made into args if more flexibility is needed for HDF5 structure.
+    # For testing phase:
     parser.add_argument('--support_size_test', type=int, default=10, help='Number of support examples per task for FINAL TESTING (K_s_test).')
-    parser.add_argument('--query_size_test', type=int, default=3, help='Number of query examples per task for FINAL TESTING (K_q_test).') # Defaulted to 3
+    # parser.add_argument('--query_size_test', type=int, default=FIXED_QUERY_SIZE, help='Number of query examples per task for FINAL TESTING (K_q_test). Default is script FIXED_QUERY_SIZE.')
 
 
-    # Training loop
-    parser.add_argument('--epochs', type=int, default=100, help='Number of meta-training epochs.')
-    parser.add_argument('--adaptation_steps_train', type=int, default=5, help='Number of adaptation steps during meta-training inner loop.')
-    parser.add_argument('--adaptation_steps_val', type=int, default=10, help='Number of adaptation steps during meta-validation.')
-    parser.add_argument('--adaptation_steps_test', type=int, default=10, help='Number of adaptation steps during final testing on each task.')
-    parser.add_argument('--num_meta_batches_per_epoch', type=int, default=100, help='Number of meta-batches per training epoch.')
+    # --- Training loop ---
+    parser.add_argument('--epochs', type=int, default=50, help='Number of meta-training epochs.') # Matches della_datapar
+    parser.add_argument('--num_meta_batches_per_epoch', type=int, default=32, help='Number of meta-batches per training epoch.') # Matches MAML_NUM_ADAPTATION_SAMPLES in della_datapar
     parser.add_argument('--num_val_meta_batches', type=int, default=25, help='Number of meta-batches for a full validation pass.')
-
-
-    # Early stopping & AMP
-    parser.add_argument('--val_freq', type=int, default=1, help='Frequency (in epochs) to run meta-validation.')
-    parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping based on val_acc improvement (in validation cycles).')
+    parser.add_argument('--val_freq', type=int, default=1, help='Frequency (in epochs) to perform validation.')
+    
+    # --- Early stopping & AMP & Other ---
+    parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping.')
     parser.add_argument('--improvement_threshold', type=float, default=0.001, help='Minimum improvement in val_acc to reset patience.')
     parser.add_argument('--use_amp', action='store_true', help='Use Automatic Mixed Precision (AMP) for training if CUDA is available.')
+    parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for AdamW optimizer in outer loop.')
+    parser.add_argument('--grad_clip_norm', type=float, default=None, help='Max norm for gradient clipping. Default is None (no clipping).')
 
-    main_args = None
-    try:
-        main_args = parser.parse_args()
-    except SystemExit as e:
-        print(f"Critical error: Argument parsing failed. Exiting. Error: {e}")
-        exit(1) # Exit if essential args are missing or parsing fails
 
+    # --- Debug related ---
+    parser.add_argument('--debug_bn_grads', action='store_true', help='Enable detailed BN grad logging (if model supports it).')
+    
+    main_args = parser.parse_args()
+    
     # Print effective track_running_stats setting
-    if main_args: # Ensure main_args was successfully parsed
-        print(f"Effective track_running_stats for MAML model: {main_args.track_running_stats_maml}")
+    # This is now controlled by the track_bn_stats arg passed to l2l.MAML
+    print(f"l2l.MAML initialized with track_running_stats={main_args.track_bn_stats}")
 
     exit_code = 0 # Default to success
     try:
-        if main_args is None: # Should have been caught by the SystemExit above, but as a safeguard
-            raise RuntimeError("Argument parsing failed before main could be called.")
         main(main_args)
     except Exception as e:
-        print(f"An error occurred during main execution: {e}")
+        print(f"Error during MAML script execution: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
-        
-        exp_name_for_log = "UNKNOWN_EXPERIMENT"
-        log_dir_for_error = None
-
-        if main_args: # Try to use parsed args to form a log path
-            timestamp_for_log = datetime.now().strftime("%Y%m%d_%H%M%S")
-            # Construct a unique name for the failed run, if possible
-            if hasattr(main_args, 'architecture') and hasattr(main_args, 'seed'):
-                exp_name_for_log = f"exp_all_tasks_fomaml_{main_args.architecture}_seed{main_args.seed}_{timestamp_for_log}_FAILED"
-            else:
-                exp_name_for_log = f"exp_all_tasks_fomaml_UNKNOWN_ARCH_SEED_{timestamp_for_log}_FAILED"
-
-            if hasattr(main_args, 'output_base_dir') and main_args.output_base_dir:
-                try:
-                    log_dir_for_error = Path(main_args.output_base_dir) / exp_name_for_log
-                except Exception as path_e:
-                    print(f"Could not form log directory path from output_base_dir: {path_e}")
-                    log_dir_for_error = None # Ensure it's None if Path construction fails
-        
-        if log_dir_for_error:
-            try:
-                log_dir_for_error.mkdir(parents=True, exist_ok=True)
-                error_file = log_dir_for_error / "ERROR_LOG.txt"
-                with open(error_file, "w") as f_err:
-                    f_err.write(f"Experiment failed: {exp_name_for_log}\n")
-                    if main_args:
-                         f_err.write(f"Arguments: {vars(main_args)}\n\n")
-                    f_err.write(str(e) + "\n")
-                    f_err.write(traceback.format_exc())
-                print(f"Detailed error log saved to {error_file}")
-            except Exception as log_e:
-                print(f"Additionally, an error occurred while trying to write the log file to {log_dir_for_error}: {log_e}")
-        else:
-            print("Could not determine a specific output directory for the error log based on arguments.")
-            # Fallback: Log to current working directory
-            try:
-                # Ensure datetime is available if not imported at the top (it is in this file)
-                fallback_exp_name = f"UNKNOWN_EXP_FAILED_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                if main_args and hasattr(main_args, 'architecture') and hasattr(main_args, 'seed'):
-                     fallback_exp_name = f"exp_all_tasks_fomaml_{main_args.architecture}_seed{main_args.seed}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_FAILED_CWD_LOG"
-                
-                cwd_error_file = Path(".") / f"ERROR_LOG_{fallback_exp_name}.txt"
-                with open(cwd_error_file, "w") as f_err:
-                    f_err.write(f"Experiment failed (logged to CWD): {exp_name_for_log}\n") # Use more general exp_name_for_log
-                    if main_args:
-                         f_err.write(f"Arguments: {vars(main_args)}\n\n")
-                    f_err.write(str(e) + "\n")
-                    f_err.write(traceback.format_exc())
-                print(f"Error log saved to current directory: {cwd_error_file}")
-            except Exception as final_log_e:
-                print(f"Failed to write error log to current directory: {final_log_e}")
-
-        exit_code = 1 
-        raise # Re-raise the exception to ensure script exits with non-zero status
-    else:
-        # This else block executes if the try block completes without an exception.
-        exit_code = 0 # Indicate success
-    
-    exit(exit_code) 
+        exit_code = 1
+    finally:
+        print(f"MAML script finished with exit code: {exit_code}")
+        sys.exit(exit_code) 

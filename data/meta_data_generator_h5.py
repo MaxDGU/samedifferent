@@ -5,6 +5,7 @@ import os
 from generate_datasets import irregular_gen, regular_gen, open_gen, wider_line_gen, scrambled_gen, random_color_gen, filled_gen, lines_gen, arrows_gen
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import math
 
 class MetaDatasetGenerator:
     def __init__(self):
@@ -91,8 +92,11 @@ class MetaDatasetGenerator:
             
         # Generate balanced pairs for query set
         query_pairs = []
-        # Generate same pairs (num_query // 2)
-        for _ in range(num_query // 2):
+        num_same_query = math.ceil(num_query / 2.0)  # Use floating point division for ceil
+        num_diff_query = math.floor(num_query / 2.0) # Use floating point division for floor
+
+        # Generate same pairs for query set
+        for _ in range(int(num_same_query)):
             if generator_fn != self._load_original_svrt:
                 image_batch = generator_fn(1, batch_size=1)
                 image = np.clip(image_batch[0] * 255.0, 0, 255).astype(np.uint8)
@@ -100,8 +104,8 @@ class MetaDatasetGenerator:
                 image = generator_fn(1, split)
             query_pairs.append((image, 1.0))
             
-        # Generate different pairs (num_query // 2)
-        for _ in range(num_query // 2):
+        # Generate different pairs for query set
+        for _ in range(int(num_diff_query)):
             if generator_fn != self._load_original_svrt:
                 image_batch = generator_fn(0, batch_size=1)
                 image = np.clip(image_batch[0] * 255.0, 0, 255).astype(np.uint8)

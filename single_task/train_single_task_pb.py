@@ -319,6 +319,7 @@ def main():
     parser.add_argument('--val_freq', type=int, default=5, help='Frequency (in epochs) to run validation.')
     parser.add_argument('--improvement_threshold', type=float, default=0.005, help='Minimum improvement in val_acc to reset patience.')
     parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for Adam optimizer.')
+    parser.add_argument('--dropout_rate_fc', type=float, default=0.3, help='Dropout rate for fully connected layers in the model.')
 
     args = parser.parse_args()
 
@@ -347,11 +348,11 @@ def main():
     # # device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # ENSURE THIS IS GONE OR COMMENTED
     
     if args.architecture == 'conv2':
-        model = Conv2CNN().to(device) # REMOVED num_classes
+        model = Conv2CNN(dropout_rate_fc=args.dropout_rate_fc).to(device) # Pass dropout_rate_fc
     elif args.architecture == 'conv4':
-        model = Conv4CNN().to(device) # REMOVED num_classes
+        model = Conv4CNN(dropout_rate_fc=args.dropout_rate_fc).to(device) # Pass dropout_rate_fc
     elif args.architecture == 'conv6':
-        model = Conv6CNN().to(device) # REMOVED num_classes
+        model = Conv6CNN(dropout_rate_fc=args.dropout_rate_fc).to(device) # Pass dropout_rate_fc
     else:
         raise ValueError(f"Unsupported architecture: {args.architecture}")
     print(f"Model {args.architecture} initialized.")

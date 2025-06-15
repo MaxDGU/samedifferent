@@ -97,7 +97,8 @@ python ${{BASE_CODE_DIR}}/train_single_task_pb.py \
     --val_freq 5 \
     --improvement_threshold 0.005 \
     --lr 0.0001 \
-    --weight_decay 1e-5
+    --weight_decay 1e-5 \
+    --dropout_rate_fc 0.5
 
 echo "Job finished for task=$TASK arch=$ARCH original_seed_run_idx=$ORIGINAL_SEED_VAL (passed as --seed $globally_unique_seed)"
 """

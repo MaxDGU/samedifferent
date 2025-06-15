@@ -4,7 +4,7 @@
 #SBATCH --ntasks=1               # Number of tasks
 #SBATCH --cpus-per-task=4        # Number of CPU cores per task
 #SBATCH --mem=16G                # Memory per node
-#SBATCH --time=06:00:00          # Walltime limit (HH:MM:SS)
+#SBATCH --time=02:00:00          # Walltime limit (HH:MM:SS)
 #SBATCH --gres=gpu:1             # Number of GPUs per node
 #SBATCH --partition=pli          # Partition
 #SBATCH --account=nam            # Account
