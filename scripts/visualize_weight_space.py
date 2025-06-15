@@ -76,9 +76,9 @@ def main(args):
 
     # Dynamically import model classes from baselines
     try:
-        from baselines.models.conv2 import ConvNet2LR
-        from baselines.models.conv4 import ConvNet4LR
-        from baselines.models.conv6 import ConvNet6LR
+        from baselines.models.conv2 import SameDifferentCNN as ConvNet2LR
+        from baselines.models.conv4 import SameDifferentCNN as ConvNet4LR
+        from baselines.models.conv6 import SameDifferentCNN as ConvNet6LR
         model_classes = {
             'Conv2': ConvNet2LR,
             'Conv4': ConvNet4LR,

@@ -48,7 +48,7 @@ class NaturalisticDataset(Dataset):
         
         if not same_dir.exists() or not diff_dir.exists():
             raise FileNotFoundError(f"Data directory for split '{split}' not found or incomplete in {self.root_dir}")
-
+        
         same_files = list(same_dir.glob('*.png'))
         diff_files = list(diff_dir.glob('*.png'))
         
@@ -60,12 +60,12 @@ class NaturalisticDataset(Dataset):
         
         if transform is None:
             # Default transforms if none provided
-            self.transform = transforms.Compose([
-                transforms.Resize((128, 128)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406],  # ImageNet statistics
-                                   std=[0.229, 0.224, 0.225])
-            ])
+        self.transform = transforms.Compose([
+            transforms.Resize((128, 128)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],  # ImageNet statistics
+                               std=[0.229, 0.224, 0.225])
+        ])
         else:
             self.transform = transform
     
@@ -176,7 +176,7 @@ def main(args):
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-
+    
     # Create datasets
     try:
         train_dataset = NaturalisticDataset(args.data_dir, 'train', transform=data_transforms)
@@ -185,7 +185,7 @@ def main(args):
         print(f"Error initializing dataset: {e}")
         print("Please ensure your --data_dir contains train/ and val/ subdirectories with same/ and different/ images.")
         return
-
+    
     print(f"Dataset sizes - Train: {len(train_dataset)}, Val: {len(val_dataset)}")
     
     # Create dataloaders
@@ -299,7 +299,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='Device to use (cuda or cpu)')
     
     args = parser.parse_args()
-    main(args)
+    main(args) 
 
 
 
