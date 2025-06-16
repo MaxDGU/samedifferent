@@ -240,7 +240,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Visualize the MAML adaptation trajectory against single-task models.")
-    parser.add_argument('--single_task_dir', type=str, default='/scratch/gpfs/mg7411/results/pb_baselines', help='Base directory for single-task model weights.')
+    parser.add_argument('--single_task_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/single_task/results/pb_single_task', help='Base directory for single-task model weights.')
     parser.add_argument('--maml_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6', help='Directory for the pre-trained MAML models.')
     parser.add_argument('--data_path', type=str, default='/scratch/gpfs/mg7411/samedifferent/data/naturalistic/test.h5', help='Path to the naturalistic HDF5 data for adaptation.')
     parser.add_argument('--output_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/visualizations/adaptation_pca', help='Directory to save the output plot.')

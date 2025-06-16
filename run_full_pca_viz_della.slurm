@@ -26,7 +26,7 @@ echo "PYTHONPATH: ${PYTHONPATH}"
 # --- Execution ---
 echo "Running the PCA visualization script..."
 python scripts/visualize_full_adaptation_pca.py \
-    --single_task_dir "/scratch/gpfs/mg7411/results/pb_baselines" \
+    --single_task_dir "/scratch/gpfs/mg7411/samedifferent/single_task/results/pb_single_task" \
     --maml_dir "/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6" \
     --data_path "/scratch/gpfs/mg7411/samedifferent/data/naturalistic/test.h5" \
     --output_dir "/scratch/gpfs/mg7411/samedifferent/visualizations/adaptation_pca" \
