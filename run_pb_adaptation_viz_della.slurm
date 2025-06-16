@@ -29,7 +29,7 @@ python scripts/visualize_pb_adaptation_pca.py \
     --meta_models_dir "/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6" \
     --data_path "/scratch/gpfs/mg7411/data/pb/pb/arrows_support6_train.h5" \
     --output_dir "/scratch/gpfs/mg7411/samedifferent/visualizations/adaptation_pca" \
-    --lr 0.01 \
+    --lr 0.001 \
     --steps 3 \
     --adaptation_batch_size 64
 
