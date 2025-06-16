@@ -25,7 +25,7 @@ echo "PYTHONPATH: ${PYTHONPATH}"
 # --- Execution ---
 echo "Running the PB Adaptation PCA script..."
 python scripts/visualize_pb_adaptation_pca.py \
-    --vanilla_model_path "/scratch/gpfs/mg7411/samedifferent/single_task/results/pb_single_task/regular/conv6/seed_80/initial_model.pth" \
+    --vanilla_model_path "/scratch/gpfs/mg7411/samedifferent/single_task/results/pb_single_task/regular/conv6/seed_0/initial_model.pth" \
     --meta_model_path "/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6/model_seed_3_pretesting.pt" \
     --data_path "/scratch/gpfs/mg7411/data/pb/pb/arrows_support6_train.h5" \
     --output_dir "/scratch/gpfs/mg7411/samedifferent/visualizations/adaptation_pca" \

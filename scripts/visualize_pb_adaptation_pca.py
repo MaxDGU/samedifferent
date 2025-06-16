@@ -162,7 +162,7 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Compare adaptation of Vanilla vs. Meta-trained models.")
     # Paths to specific model files
-    parser.add_argument('--vanilla_model_path', type=str, default='/scratch/gpfs/mg7411/samedifferent/single_task/results/pb_single_task/regular/conv6/seed_80/initial_model.pth', help='Path to the initial Vanilla-PB model weights.')
+    parser.add_argument('--vanilla_model_path', type=str, default='/scratch/gpfs/mg7411/samedifferent/single_task/results/pb_single_task/regular/conv6/seed_0/initial_model.pth', help='Path to the initial Vanilla-PB model weights.')
     parser.add_argument('--meta_model_path', type=str, default='/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6/model_seed_3_pretesting.pt', help='Path to the trained Meta-PB model weights.')
     # Path to adaptation data
     parser.add_argument('--data_path', type=str, default='/scratch/gpfs/mg7411/data/pb/pb/arrows_support6_train.h5', help='Path to the HDF5 data for adaptation.')
