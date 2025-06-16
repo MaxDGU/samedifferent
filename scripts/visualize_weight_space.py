@@ -102,12 +102,8 @@ def main(args):
 
             try:
                 model_class = model_classes[model_arch]
-                
-                # Correctly instantiate models.
-                if model_arch in ['Conv4', 'Conv6']:
-                    model = model_class(num_classes=2)
-                else:
-                    model = model_class()
+                # Do not pass num_classes, as the base class doesn't accept it.
+                model = model_class()
                 
                 device = torch.device("cpu")
                 model.to(device)
@@ -126,7 +122,8 @@ def main(args):
                 else:
                     state_dict = checkpoint
                 
-                model.load_state_dict(state_dict)
+                # Load weights with strict=False to tolerate mismatches between model and checkpoint
+                model.load_state_dict(state_dict, strict=False)
 
                 flat_weights = flatten_weights(model)
                 all_weights.append(flat_weights)

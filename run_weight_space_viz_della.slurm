@@ -10,7 +10,8 @@
 # Load required modules
 module purge
 module load anaconda3/2023.9
-module load cuda/11.8
+# The script runs on CPU, so CUDA is not required
+# module load cuda/11.8
 conda activate tensorflow
 
 # Ensure the visualizations directory exists
