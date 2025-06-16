@@ -113,19 +113,15 @@ def main(args):
             # This logic replicates the folder structure from the original training script
             globally_unique_seed_for_folder = (task_idx * SEEDS_PER_TASK_IN_ORIG_EXP) + seed
             
-            # Define potential model paths with both .pth and .pt extensions
-            base_path = single_task_dir / task_name / 'conv6' / f'seed_{globally_unique_seed_for_folder}' / 'best_model'
-            model_path_pth = base_path.with_suffix('.pth')
-            model_path_pt = base_path.with_suffix('.pt')
+            # The user specified to look for initial_model.pth.
+            model_path = single_task_dir / task_name / 'conv6' / f'seed_{globally_unique_seed_for_folder}' / 'initial_model.pth'
             
             model_path_to_load = None
             
-            print(f"  - Checking for single-task model in: {base_path.parent}")
+            print(f"  - Checking for single-task model: {model_path}")
 
-            if model_path_pth.exists():
-                model_path_to_load = model_path_pth
-            elif model_path_pt.exists():
-                model_path_to_load = model_path_pt
+            if model_path.exists():
+                model_path_to_load = model_path
             
             if model_path_to_load:
                 print(f"    - Found! Loading weights from {model_path_to_load}...")
