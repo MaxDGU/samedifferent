@@ -86,25 +86,37 @@ def get_model_and_path(exp_type, model_arch, seed):
         elif exp_type == 'Vanilla-Naturalistic':
             path = f'/scratch/gpfs/mg7411/samedifferent/logs_naturalistic_vanilla/{model_name_lower}/seed_{seed}/best_model.pt'
         else:
-            path = None # Should not happen
+            raise ValueError(f"Unknown experiment type: {exp_type}")
     if path is None:
         raise ValueError(f"Could not determine path for {exp_type} {model_arch}")
     return model_class, path
 
 def main(args):
+    # More granular seed configuration to handle special cases
     seed_config = {
-        'Meta-PB': [0, 1, 2, 3, 4],
-        'Meta-Naturalistic': [0, 1, 2, 3, 4],
-        'Vanilla-Naturalistic': [789, 42, 999, 555, 123]
+        'Meta-PB': {
+            'Conv2': [0, 1, 2, 3, 4],
+            'Conv4': [0, 1, 2, 3, 4],
+            'Conv6': [3, 4, 5, 6, 7], # Corrected seeds for this model
+        },
+        'Meta-Naturalistic': {
+            'Conv2': [0, 1, 2, 3, 4],
+            'Conv4': [0, 1, 2, 3, 4],
+            'Conv6': [0, 1, 2, 3, 4],
+        },
+        'Vanilla-Naturalistic': {
+            'Conv2': [789, 42, 999, 555, 123],
+            'Conv4': [789, 42, 999, 555, 123],
+            'Conv6': [789, 42, 999, 555, 123],
+        }
     }
-    architectures = ['Conv2', 'Conv4', 'Conv6']
-
+    
     pca_weights, pca_labels = [], []
     tsne_weights, tsne_labels = [], []
     
     print("\n--- Loading and Flattening Model Weights ---")
-    for exp_type, seeds in seed_config.items():
-        for model_arch in architectures:
+    for exp_type, arch_seeds in seed_config.items():
+        for model_arch, seeds in arch_seeds.items():
             added_for_tsne = False
             for seed in seeds:
                 try:
