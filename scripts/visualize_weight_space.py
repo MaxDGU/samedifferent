@@ -202,6 +202,11 @@ def main(args):
 
         plot_results(results, pca_labels, "PCA", args.output_dir / "weights_pca_all_seeds_zoomed.png", "PCA Projection (Zoomed In)", xlim=(zoom_x_min, zoom_x_max), ylim=(zoom_y_min, zoom_y_max))
 
+        # Free up memory before running t-SNE
+        del pca_weights
+        del weights_matrix_pca
+        del results
+
     if tsne_weights:
         weights_matrix_tsne = pad_and_stack(tsne_weights)
         print(f"\n--- Running t-SNE on {weights_matrix_tsne.shape[0]} weight vectors (one seed each) ---")
