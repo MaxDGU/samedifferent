@@ -48,7 +48,7 @@ def main(args):
     # Using a single seed for each experiment type for consistency
     pb_seed = 4
     nat_seed = 4
-    vanilla_seed = 47
+    vanilla_seed = 42
 
     config = {
         'Meta-PB': {
