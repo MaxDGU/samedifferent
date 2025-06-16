@@ -217,6 +217,35 @@ def main(args):
             results = tsne.fit_transform(weights_matrix_tsne)
             plot_results(results, tsne_labels, "t-SNE", args.output_dir / "weights_tsne_one_seed.png", "t-SNE Projection of Model Weights (One Seed per Type)")
 
+    # --- Generate individual t-SNE plots for each model type ---
+    print("\n--- Generating individual t-SNE plots for each model group ---")
+    unique_groups = sorted(list(set([label.split('-seed')[0] for label in pca_labels])))
+
+    for group in unique_groups:
+        print(f"  Processing group: {group}")
+        group_indices = [i for i, label in enumerate(pca_labels) if label.startswith(group)]
+
+        if len(group_indices) < 2:
+            print(f"    Not enough data points for t-SNE ({len(group_indices)} found). Skipping.")
+            continue
+
+        group_weights = [pca_weights[i] for i in group_indices]
+        group_labels = [pca_labels[i] for i in group_indices]
+
+        weights_matrix_group = pad_and_stack(group_weights)
+
+        perplexity = min(30, weights_matrix_group.shape[0] - 1)
+        if perplexity > 0:
+            # verbose=0 to reduce log spam for many plots
+            tsne = TSNE(n_components=2, verbose=0, perplexity=perplexity, max_iter=1000, random_state=42)
+            results = tsne.fit_transform(weights_matrix_group)
+            
+            output_filename = f"tsne_individual_{group}.png"
+            plot_title = f"t-SNE Projection for {group} (All Seeds)"
+            plot_results(results, group_labels, "t-SNE", args.output_dir / output_filename, plot_title)
+        else:
+            print(f"    Not enough data points for t-SNE. Skipping group {group}.")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualize model weight space.")
     parser.add_argument('--output_dir', type=Path, default=Path('/scratch/gpfs/mg7411/samedifferent/visualizations'),
