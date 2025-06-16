@@ -102,15 +102,23 @@ def main(args):
 
     # 1. Load Single-Task Weights
     print("\n--- Loading Single-Task Model Weights ---")
-    single_task_tasks = ['regular', 'lines', 'open', 'wider_line', 'scrambled', 'random_color', 'arrows', 'irregular', 'filled', 'original']
-    for task in single_task_tasks:
-        for seed in range(5): # Load first 5 seeds for each task
-            model_path = single_task_dir / task / 'conv6' / f'seed_{seed}' / 'best_model.pt'
+    PB_TASKS = ['regular', 'lines', 'open', 'wider_line', 'scrambled', 'random_color', 'arrows', 'irregular', 'filled', 'original']
+    SEEDS_PER_TASK_IN_ORIG_EXP = 10 # This reflects the original experiment's folder structure
+    SEEDS_TO_LOAD = range(5) # We only want to load the first 5 seeds for this analysis
+
+    for task_idx, task_name in enumerate(PB_TASKS):
+        for seed in SEEDS_TO_LOAD:
+            # This logic replicates the folder structure from the original training script,
+            # where seed folders had globally unique names.
+            globally_unique_seed_for_folder = (task_idx * SEEDS_PER_TASK_IN_ORIG_EXP) + seed
+            model_path = single_task_dir / task_name / 'conv6' / f'seed_{globally_unique_seed_for_folder}' / 'best_model.pth'
+
             if not model_path.exists(): continue
+            
             weights = load_and_flatten(model_path, StandardConv6)
             if weights is not None:
                 all_weights.append(weights)
-                all_labels.append(f'Single-Task ({task})')
+                all_labels.append(f'Single-Task ({task_name})')
                 all_colors.append(single_task_color)
 
     # 2. Load MAML Weights and Adapt Them
@@ -211,7 +219,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Visualize the MAML adaptation trajectory against single-task models.")
-    parser.add_argument('--single_task_dir', type=str, default='/scratch/gpfs/mg7411/results/pb_baselines/regular', help='Base directory for single-task model weights.')
+    parser.add_argument('--single_task_dir', type=str, default='/scratch/gpfs/mg7411/results/pb_baselines', help='Base directory for single-task model weights.')
     parser.add_argument('--maml_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6', help='Directory for the pre-trained MAML models.')
     parser.add_argument('--data_path', type=str, default='/scratch/gpfs/mg7411/samedifferent/data/naturalistic/test.h5', help='Path to the naturalistic HDF5 data for adaptation.')
     parser.add_argument('--output_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/visualizations/adaptation_pca', help='Directory to save the output plot.')
