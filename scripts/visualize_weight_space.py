@@ -92,16 +92,22 @@ def get_model_and_path(exp_type, model_arch, seed):
             'Conv6': f'/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6/model_seed_{seed}_pretesting.pt'
         }
         path = path_templates.get(model_arch)
-    else:
+    else: # All other models use the standard architectures
         model_map = {'Conv2': StandardConv2, 'Conv4': StandardConv4, 'Conv6': StandardConv6}
         model_class = model_map[model_arch]
-        model_name_lower = model_arch.lower() + 'lr'
+        
         if exp_type == 'Meta-Naturalistic':
+            model_name_lower = model_arch.lower() + 'lr'
             path = f'/scratch/gpfs/mg7411/samedifferent/naturalistic/results_meta_della/{model_name_lower}/seed_{seed}/{model_name_lower}/seed_{seed}/{model_name_lower}_best.pth'
         elif exp_type == 'Vanilla-Naturalistic':
+            model_name_lower = model_arch.lower() + 'lr'
             path = f'/scratch/gpfs/mg7411/samedifferent/logs_naturalistic_vanilla/{model_name_lower}/seed_{seed}/best_model.pt'
+        elif exp_type == 'Vanilla-PB':
+            model_name_lower_no_lr = model_arch.lower()
+            path = f'/scratch/gpfs/mg7411/results/pb_baselines/regular/{model_name_lower_no_lr}/seed_{seed}/best_model.pt'
         else:
-            raise ValueError(f"Unknown experiment type: {exp_type}")
+            path = None 
+    
     if path is None:
         raise ValueError(f"Could not determine path for {exp_type} {model_arch}")
     return model_class, path
@@ -112,7 +118,7 @@ def main(args):
         'Meta-PB': {
             'Conv2': [0, 1, 2, 3, 4],
             'Conv4': [0, 1, 2, 3, 4],
-            'Conv6': [3, 4, 5, 6, 7], # Corrected seeds for this model
+            'Conv6': [3, 4, 5, 6, 7],
         },
         'Meta-Naturalistic': {
             'Conv2': [0, 1, 2, 3, 4],
@@ -123,6 +129,11 @@ def main(args):
             'Conv2': [789, 42, 999, 555, 123],
             'Conv4': [789, 42, 999, 555, 123],
             'Conv6': [789, 42, 999, 555, 123],
+        },
+        'Vanilla-PB': {
+            'Conv2': [46, 47, 48, 49, 50],
+            'Conv4': [46, 47, 48, 49, 50],
+            'Conv6': [46, 47, 48, 49, 50],
         }
     }
     
