@@ -64,29 +64,38 @@ class PB_Conv4(nn.Module):
         return x
 
 class PB_Conv6(nn.Module):
-    """Matches the Meta-PB-Conv6 checkpoints.
-    Error log indicates this is a Conv2-like architecture with a 13068 input fc layer.
+    """
+    Matches the Meta-PB-Conv6 checkpoints.
+    Updated based on error logs to use LayerNorm instead of BatchNorm
+    and to have a forward pass that reflects this structure.
     """
     def __init__(self, num_classes=2):
         super(PB_Conv6, self).__init__()
         self.conv1 = nn.Conv2d(3, 6, 2)
-        self.bn1 = nn.BatchNorm2d(6)
         self.conv2 = nn.Conv2d(6, 12, 2)
-        self.bn2 = nn.BatchNorm2d(12)
         
         self.fc_layers = nn.ModuleList([
             nn.Linear(13068, 1024),
             nn.Linear(1024, 1024),
             nn.Linear(1024, 1024),
         ])
+        
+        self.layer_norms = nn.ModuleList([
+            nn.LayerNorm(1024),
+            nn.LayerNorm(1024),
+            nn.LayerNorm(1024),
+        ])
+        
         self.classifier = nn.Linear(1024, num_classes)
         self.relu = nn.ReLU()
 
     def forward(self, x):
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = F.relu(self.bn2(self.conv2(x)))
+        x = self.relu(self.conv1(x))
+        x = self.relu(self.conv2(x))
         x = x.view(x.size(0), -1)
-        for fc in self.fc_layers:
-            x = self.relu(fc(x))
+        
+        for i, fc in enumerate(self.fc_layers):
+            x = self.relu(self.layer_norms[i](fc(x)))
+            
         x = self.classifier(x)
         return x 
