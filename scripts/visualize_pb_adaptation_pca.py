@@ -25,29 +25,39 @@ except ImportError as e:
     sys.exit(1)
 
 # --- Dataset for Adaptation ---
-class LazyHDF5Dataset(Dataset):
-    """Lazily loads data from an HDF5 file for adaptation."""
+class SimpleHDF5Dataset(Dataset):
+    """
+    Loads data from an HDF5 file where support images and labels are
+    stored in top-level datasets. The first dimension of these datasets
+    is treated as the episode index.
+    """
     def __init__(self, h5_path, transform=None):
         self.h5_path = h5_path
         self.transform = transform
-        self.file = None
-        self.index_map = []
+        self.file = None # For lazy opening
+        
         with h5py.File(self.h5_path, 'r') as hf:
-            for key in [k for k in hf.keys() if k.startswith('episode_')]:
-                if 'support_images' in hf[key]:
-                    num_samples = hf[key]['support_images'].shape[0]
-                    for i in range(num_samples):
-                        self.index_map.append((key, i))
-    
+            # The total number of items is num_episodes * num_images_per_episode
+            self.num_episodes, self.num_support_per_ep = hf['support_images'].shape[:2]
+            self.total_samples = self.num_episodes * self.num_support_per_ep
+
     def __len__(self):
-        return len(self.index_map)
+        return self.total_samples
 
     def __getitem__(self, idx):
-        if self.file is None: self.file = h5py.File(self.h5_path, 'r')
-        ep_key, item_idx = self.index_map[idx]
-        image = self.file[ep_key]['support_images'][item_idx]
-        label = self.file[ep_key]['support_labels'][item_idx]
-        if self.transform: image = self.transform(image)
+        if self.file is None:
+            self.file = h5py.File(self.h5_path, 'r')
+            
+        # Calculate which episode and which item in that episode this index corresponds to
+        episode_idx = idx // self.num_support_per_ep
+        item_idx_in_episode = idx % self.num_support_per_ep
+        
+        image = self.file['support_images'][episode_idx, item_idx_in_episode]
+        label = self.file['support_labels'][episode_idx, item_idx_in_episode]
+        
+        if self.transform:
+            image = self.transform(image)
+            
         return image, torch.from_numpy(np.array(label)).long()
 
 # --- Helper Functions ---
@@ -83,8 +93,8 @@ def main(args):
     transform_vanilla = T.Compose([T.ToPILImage(), T.Resize((128, 128)), T.ToTensor()])
     transform_meta = T.Compose([T.ToPILImage(), T.Resize((35, 35)), T.ToTensor()])
     
-    loader_vanilla = DataLoader(LazyHDF5Dataset(args.data_path, transform=transform_vanilla), batch_size=args.adaptation_batch_size, shuffle=True)
-    loader_meta = DataLoader(LazyHDF5Dataset(args.data_path, transform=transform_meta), batch_size=args.adaptation_batch_size, shuffle=True)
+    loader_vanilla = DataLoader(SimpleHDF5Dataset(args.data_path, transform=transform_vanilla), batch_size=args.adaptation_batch_size, shuffle=True)
+    loader_meta = DataLoader(SimpleHDF5Dataset(args.data_path, transform=transform_meta), batch_size=args.adaptation_batch_size, shuffle=True)
 
     # --- Load Models ---
     print("\n--- Loading Models ---")
@@ -155,7 +165,7 @@ if __name__ == '__main__':
     parser.add_argument('--vanilla_model_path', type=str, default='/scratch/gpfs/mg7411/samedifferent/single_task/results/pb_single_task/regular/conv6/seed_80/initial_model.pth', help='Path to the initial Vanilla-PB model weights.')
     parser.add_argument('--meta_model_path', type=str, default='/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6/model_seed_3_pretesting.pt', help='Path to the trained Meta-PB model weights.')
     # Path to adaptation data
-    parser.add_argument('--data_path', type=str, default='/scratch/gpfs/mg7411/data/pb/pb/arrows_support6_test.h5', help='Path to the HDF5 data for adaptation.')
+    parser.add_argument('--data_path', type=str, default='/scratch/gpfs/mg7411/data/pb/pb/arrows_support6_train.h5', help='Path to the HDF5 data for adaptation.')
     # Output and training parameters
     parser.add_argument('--output_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/visualizations/adaptation_pca', help='Directory to save the output plot.')
     parser.add_argument('--lr', type=float, default=0.01, help='Learning rate for adaptation.')
