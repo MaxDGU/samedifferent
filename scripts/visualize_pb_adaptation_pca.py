@@ -77,7 +77,7 @@ def adapt_model(model, loader, device, lr, steps):
             error = loss_func(maml_wrapper(batch_images), batch_labels)
             maml_wrapper.adapt(error, allow_unused=True)
             
-    return maml_wrapper.module
+    return maml_wrapper.learner
 
 def check_and_report_nan(weights, context_msg):
     """Checks for NaN in a numpy array and prints a message if found."""
@@ -125,7 +125,7 @@ def main(args):
             check_and_report_nan(initial_weights, f"in initial Vanilla model, seed {seed}")
             all_weights_vanilla_pre.append(initial_weights)
             
-            adapted_model = adapt_model(model, loader_vanilla, device, args.lr, args.steps)
+            adapted_model = adapt_model(model, loader_vanilla, device, args.vanilla_lr, args.steps)
 
             # Check for NaNs in adapted weights
             adapted_weights = flatten_weights(adapted_model)
@@ -150,7 +150,7 @@ def main(args):
             check_and_report_nan(initial_weights, f"in initial Meta model, seed {seed}")
             all_weights_meta_pre.append(initial_weights)
 
-            adapted_model = adapt_model(model, loader_meta, device, args.lr, args.steps)
+            adapted_model = adapt_model(model, loader_meta, device, args.meta_lr, args.steps)
 
             # Check for NaNs in adapted weights
             adapted_weights = flatten_weights(adapted_model)
@@ -225,7 +225,8 @@ if __name__ == '__main__':
     parser.add_argument('--data_path', type=str, default='/scratch/gpfs/mg7411/data/pb/pb/arrows_support6_train.h5', help='Path to the HDF5 data for adaptation.')
     # Output and training parameters
     parser.add_argument('--output_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/visualizations/adaptation_pca', help='Directory to save the output plot.')
-    parser.add_argument('--lr', type=float, default=0.001, help='Learning rate for adaptation.')
+    parser.add_argument('--meta_lr', type=float, default=0.01, help='Learning rate for meta model adaptation.')
+    parser.add_argument('--vanilla_lr', type=float, default=0.001, help='Learning rate for vanilla model adaptation.')
     parser.add_argument('--steps', type=int, default=3, help='Number of adaptation epochs.')
     parser.add_argument('--adaptation_batch_size', type=int, default=64, help='Batch size for adaptation.')
     args = parser.parse_args()
