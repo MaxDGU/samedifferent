@@ -140,6 +140,7 @@ def main(args):
 
     # 2. Load MAML Weights and Adapt Them
     print("\n--- Loading and Adapting MAML Model Weights ---")
+    print(f"Searching for MAML models in: {maml_dir}")
     adaptation_loader = DataLoader(
         LazyHDF5Dataset(data_path, transform=T.Compose([T.ToPILImage(), T.Resize((35, 35)), T.ToTensor()]), max_samples=args.max_adaptation_samples),
         batch_size=args.adaptation_batch_size, shuffle=True
@@ -149,15 +150,20 @@ def main(args):
     pre_adaptation_weights = []
     post_adaptation_weights = []
 
-    for seed in range(3, 8): # Seeds 3-7 for this MAML model
-        model_path = maml_dir / f'model_seed_{seed}_pretesting.pt'
-        if not model_path.exists():
-            print(f"Warning: MAML weight file for seed {seed} not found at {model_path}. Skipping.")
-            continue
+    maml_model_files = sorted(list(maml_dir.glob('model_seed_*_pretesting.pt')))
+    print(f"Found {len(maml_model_files)} MAML model files to process.")
+
+    for model_path in maml_model_files:
+        print(f"Processing MAML model: {model_path.name}...")
         
-        print(f"Processing MAML seed {seed}...")
-        model = MamlModel()
-        model.load_state_dict(torch.load(model_path, map_location='cpu'), strict=False)
+        try:
+            model = MamlModel()
+            # Explicitly set weights_only=False, as these older checkpoints might contain more than just weights
+            state_dict = torch.load(model_path, map_location='cpu', weights_only=False)
+            model.load_state_dict(state_dict, strict=False)
+        except Exception as e:
+            print(f"  - ERROR: Could not load model from {model_path}. Error: {e}")
+            continue
         
         # Store pre-adaptation weights
         pre_weights = flatten_weights(model)
@@ -170,11 +176,13 @@ def main(args):
             for batch_images, batch_labels in adaptation_loader:
                 batch_images, batch_labels = batch_images.to(device), batch_labels.to(device)
                 error = loss_func(maml(batch_images), batch_labels)
-                maml.adapt(error)
+                maml.adapt(error, allow_unused=True)
         
         # Store post-adaptation weights
         post_weights = flatten_weights(maml.module)
         post_adaptation_weights.append(post_weights)
+    
+    print(f"--- Finished adapting MAML models. Processed {len(post_adaptation_weights)} models successfully. ---")
 
     # Add MAML weights to the main list
     all_weights.extend(pre_adaptation_weights)
