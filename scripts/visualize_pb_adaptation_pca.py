@@ -225,7 +225,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_path', type=str, default='/scratch/gpfs/mg7411/data/pb/pb/arrows_support6_train.h5', help='Path to the HDF5 data for adaptation.')
     # Output and training parameters
     parser.add_argument('--output_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/visualizations/adaptation_pca', help='Directory to save the output plot.')
-    parser.add_argument('--lr', type=float, default=0.01, help='Learning rate for adaptation.')
+    parser.add_argument('--lr', type=float, default=0.001, help='Learning rate for adaptation.')
     parser.add_argument('--steps', type=int, default=3, help='Number of adaptation epochs.')
     parser.add_argument('--adaptation_batch_size', type=int, default=64, help='Batch size for adaptation.')
     args = parser.parse_args()
