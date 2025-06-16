@@ -3,7 +3,7 @@
 #SBATCH --output=/scratch/gpfs/mg7411/samedifferent/slurm/weight_viz_%A.out
 #SBATCH --error=/scratch/gpfs/mg7411/samedifferent/slurm/weight_viz_%A.err
 #SBATCH --time=01:00:00
-#SBATCH --mem=32G
+#SBATCH --mem=64G
 #SBATCH --partition=pli
 #SBATCH --account=nam
 

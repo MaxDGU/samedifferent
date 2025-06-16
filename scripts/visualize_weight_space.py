@@ -17,14 +17,16 @@ try:
     from baselines.models.conv2 import SameDifferentCNN as StandardConv2
     from baselines.models.conv4 import SameDifferentCNN as StandardConv4
     from baselines.models.conv6 import SameDifferentCNN as StandardConv6
-    from scripts.temp_model import SameDifferentCNN as PB_Hybrid_CNN
+    from scripts.temp_model import PB_Conv2, PB_Conv4, PB_Conv6
     print("Successfully imported all model architectures.")
 except ImportError as e:
     print(f"Fatal Error importing models: {e}. A dummy class will be used.")
     class StandardConv2: pass
     class StandardConv4: pass
     class StandardConv6: pass
-    class PB_Hybrid_CNN: pass
+    class PB_Conv2: pass
+    class PB_Conv4: pass
+    class PB_Conv6: pass
 
 def flatten_weights(model):
     """Flattens all parameters of a model into a single 1D numpy array."""
@@ -35,8 +37,9 @@ def plot_results(results, labels, method_name, output_path, title):
     fig, ax = plt.subplots(figsize=(22, 20))
     
     unique_groups = sorted(list(set([l.split('-seed')[0] for l in labels])))
-    colors = plt.cm.get_cmap('tab20', len(unique_groups))
-    color_map = {group: colors(i) for i, group in enumerate(unique_groups)}
+    # Fix deprecation warning for get_cmap
+    colors = plt.colormaps.get_cmap('tab20')(np.linspace(0, 1, len(unique_groups)))
+    color_map = {group: colors[i] for i, group in enumerate(unique_groups)}
 
     for i, label in enumerate(labels):
         group_label = label.split('-seed')[0]
@@ -66,13 +69,14 @@ def plot_results(results, labels, method_name, output_path, title):
 def get_model_and_path(exp_type, model_arch, seed):
     """Returns the correct model class and file path."""
     if exp_type == 'Meta-PB':
-        model_class = PB_Hybrid_CNN
+        model_map = {'Conv2': PB_Conv2, 'Conv4': PB_Conv4, 'Conv6': PB_Conv6}
+        model_class = model_map[model_arch]
         path_templates = {
             'Conv2': f'/scratch/gpfs/mg7411/exp1_conv2lr_runs_20250125_111902/seed_{seed}/model_seed_{seed}_pretesting.pt',
             'Conv4': f'/scratch/gpfs/mg7411/exp1_(finished)conv4lr_runs_20250126_201548/seed_{seed}/model_seed_{seed}_pretesting.pt',
             'Conv6': f'/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6/model_seed_{seed}_pretesting.pt'
         }
-        path = path_templates[model_arch]
+        path = path_templates.get(model_arch)
     else:
         model_map = {'Conv2': StandardConv2, 'Conv4': StandardConv4, 'Conv6': StandardConv6}
         model_class = model_map[model_arch]
@@ -82,7 +86,9 @@ def get_model_and_path(exp_type, model_arch, seed):
         elif exp_type == 'Vanilla-Naturalistic':
             path = f'/scratch/gpfs/mg7411/samedifferent/logs_naturalistic_vanilla/{model_name_lower}/seed_{seed}/best_model.pt'
         else:
-            raise ValueError(f"Unknown experiment type: {exp_type}")
+            path = None # Should not happen
+    if path is None:
+        raise ValueError(f"Could not determine path for {exp_type} {model_arch}")
     return model_class, path
 
 def main(args):
@@ -109,7 +115,8 @@ def main(args):
                     print(f"  Processing {path}...")
                     
                     model = model_class()
-                    checkpoint = torch.load(path, map_location=torch.device("cpu"))
+                    # Explicitly set weights_only=False to handle complex checkpoints
+                    checkpoint = torch.load(path, map_location=torch.device("cpu"), weights_only=False)
                     
                     state_dict = checkpoint.get('model_state_dict') or checkpoint.get('state_dict') or checkpoint.get('model') or (checkpoint.get('net') and {k.replace('net.', ''): v for k, v in checkpoint['net'].items()}) or checkpoint
                     
@@ -144,7 +151,8 @@ def main(args):
         print(f"\n--- Running t-SNE on {weights_matrix_tsne.shape[0]} weight vectors (one seed each) ---")
         perplexity = min(30, weights_matrix_tsne.shape[0] - 1)
         if perplexity > 0:
-            tsne = TSNE(n_components=2, verbose=1, perplexity=perplexity, n_iter=1000, random_state=42)
+            # Fix deprecation warning for n_iter
+            tsne = TSNE(n_components=2, verbose=1, perplexity=perplexity, max_iter=1000, random_state=42)
             results = tsne.fit_transform(weights_matrix_tsne)
             plot_results(results, tsne_labels, "t-SNE", args.output_dir / "weights_tsne_one_seed.png", "t-SNE Projection of Model Weights (One Seed per Type)")
 
