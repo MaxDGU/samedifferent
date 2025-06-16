@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 # These are specific model definitions to match the architectures
 # found in the older "Meta-PB" checkpoints. Each architecture is
-# different and the layer sizes are hardcoded based on error logs.
+# different and the layer sizes are hardcoded based on the latest error logs.
 
 class PB_Conv2(nn.Module):
     """Matches the Meta-PB-Conv2 checkpoints.
@@ -65,7 +65,7 @@ class PB_Conv4(nn.Module):
 
 class PB_Conv6(nn.Module):
     """Matches the Meta-PB-Conv6 checkpoints.
-    Error log indicates this is actually a Conv2-like architecture.
+    Error log indicates this is a Conv2-like architecture with a 13068 input fc layer.
     """
     def __init__(self, num_classes=2):
         super(PB_Conv6, self).__init__()

@@ -32,7 +32,7 @@ def flatten_weights(model):
     """Flattens all parameters of a model into a single 1D numpy array."""
     return np.concatenate([p.cpu().detach().numpy().flatten() for p in model.parameters()])
 
-def plot_results(results, labels, method_name, output_path, title):
+def plot_results(results, labels, method_name, output_path, title, xlim=None, ylim=None):
     """Generates and saves a scatter plot for PCA or t-SNE results."""
     fig, ax = plt.subplots(figsize=(22, 20))
     
@@ -43,15 +43,24 @@ def plot_results(results, labels, method_name, output_path, title):
 
     for i, label in enumerate(labels):
         group_label = label.split('-seed')[0]
+        # Only plot points within the specified limits if provided
+        if xlim and not (xlim[0] <= results[i, 0] <= xlim[1]):
+            continue
+        if ylim and not (ylim[0] <= results[i, 1] <= ylim[1]):
+            continue
+
         ax.scatter(results[i, 0], results[i, 1], c=[color_map[group_label]], s=180, alpha=0.7)
         
         is_tsne = "t-SNE" in title
+        # Use smaller font for the busy PCA plot
+        font_size = 8 if "PCA" in title and "Zoomed" in title else 12
         label_text = group_label if is_tsne else label
+
         if is_tsne:
             if label not in labels[:i]:
-                 ax.text(results[i, 0], results[i, 1] + 0.05, label_text, fontsize=12, ha='center')
+                 ax.text(results[i, 0], results[i, 1] + 0.05, label_text, fontsize=font_size, ha='center')
         else:
-            ax.text(results[i, 0], results[i, 1] + 0.05, label_text, fontsize=9, ha='center')
+            ax.text(results[i, 0], results[i, 1] + 0.05, label_text, fontsize=font_size, ha='center')
 
     from matplotlib.lines import Line2D
     legend_elements = [Line2D([0], [0], marker='o', color='w', label=group, markerfacecolor=color_map[group], markersize=14) for group in unique_groups]
@@ -62,6 +71,12 @@ def plot_results(results, labels, method_name, output_path, title):
     ax.set_ylabel(f"{method_name} Dimension 2", fontsize=16)
     ax.grid(True, which='both', linestyle='--', linewidth=0.5)
     
+    # Set plot limits if provided
+    if xlim:
+        ax.set_xlim(xlim)
+    if ylim:
+        ax.set_ylim(ylim)
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, bbox_inches='tight')
     print(f"\n{method_name} plot saved to {output_path}")
@@ -156,8 +171,26 @@ def main(args):
         print(f"\n--- Running PCA on {weights_matrix_pca.shape[0]} weight vectors (all seeds) ---")
         pca = PCA(n_components=2, random_state=42)
         results = pca.fit_transform(weights_matrix_pca)
+        
+        # --- Plot 1: Full PCA view ---
         plot_results(results, pca_labels, "PCA", args.output_dir / "weights_pca_all_seeds.png", "PCA Projection of All Model Weights (All Seeds)")
-    
+
+        # --- Plot 2: Zoomed-in PCA view ---
+        # Find the dense cluster by filtering out outliers
+        x_coords = results[:, 0]
+        y_coords = results[:, 1]
+        x_mean, x_std = np.mean(x_coords), np.std(x_coords)
+        y_mean, y_std = np.mean(y_coords), np.std(y_coords)
+        
+        # Define the zoom box as points within ~1 standard deviation of the mean
+        zoom_mask = (np.abs(x_coords - x_mean) < x_std) & (np.abs(y_coords - y_mean) < y_std)
+        
+        # Calculate plot limits from the non-outlier points, with a small margin
+        zoom_x_min, zoom_x_max = results[zoom_mask, 0].min() - 5, results[zoom_mask, 0].max() + 5
+        zoom_y_min, zoom_y_max = results[zoom_mask, 1].min() - 5, results[zoom_mask, 1].max() + 5
+
+        plot_results(results, pca_labels, "PCA", args.output_dir / "weights_pca_all_seeds_zoomed.png", "PCA Projection (Zoomed In)", xlim=(zoom_x_min, zoom_x_max), ylim=(zoom_y_min, zoom_y_max))
+
     if tsne_weights:
         weights_matrix_tsne = pad_and_stack(tsne_weights)
         print(f"\n--- Running t-SNE on {weights_matrix_tsne.shape[0]} weight vectors (one seed each) ---")
