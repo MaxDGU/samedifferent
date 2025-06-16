@@ -79,6 +79,13 @@ def adapt_model(model, loader, device, lr, steps):
             
     return maml_wrapper.module
 
+def check_and_report_nan(weights, context_msg):
+    """Checks for NaN in a numpy array and prints a message if found."""
+    if np.isnan(weights).any():
+        print(f"    WARNING: NaN values detected {context_msg}")
+        return True
+    return False
+
 def main(args):
     # --- Paths and Config ---
     output_dir = Path(args.output_dir)
@@ -112,10 +119,18 @@ def main(args):
             print(f"  Loading model for seed {seed} from {path}...")
             model = VanillaModel()
             model.load_state_dict(torch.load(path, map_location='cpu'))
-            all_weights_vanilla_pre.append(flatten_weights(model))
+
+            # Check for NaNs in initial weights
+            initial_weights = flatten_weights(model)
+            check_and_report_nan(initial_weights, f"in initial Vanilla model, seed {seed}")
+            all_weights_vanilla_pre.append(initial_weights)
             
             adapted_model = adapt_model(model, loader_vanilla, device, args.lr, args.steps)
-            all_weights_vanilla_post.append(flatten_weights(adapted_model))
+
+            # Check for NaNs in adapted weights
+            adapted_weights = flatten_weights(adapted_model)
+            check_and_report_nan(adapted_weights, f"after adapting Vanilla model, seed {seed}")
+            all_weights_vanilla_post.append(adapted_weights)
             print(f"  Finished adapting seed {seed}.")
         except Exception as e:
             print(f"    ERROR processing vanilla seed {seed}: {e}")
@@ -129,10 +144,18 @@ def main(args):
             model = MetaModel()
             checkpoint = torch.load(path, map_location='cpu')
             model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-            all_weights_meta_pre.append(flatten_weights(model))
+
+            # Check for NaNs in initial weights
+            initial_weights = flatten_weights(model)
+            check_and_report_nan(initial_weights, f"in initial Meta model, seed {seed}")
+            all_weights_meta_pre.append(initial_weights)
 
             adapted_model = adapt_model(model, loader_meta, device, args.lr, args.steps)
-            all_weights_meta_post.append(flatten_weights(adapted_model))
+
+            # Check for NaNs in adapted weights
+            adapted_weights = flatten_weights(adapted_model)
+            check_and_report_nan(adapted_weights, f"after adapting Meta model, seed {seed}")
+            all_weights_meta_post.append(adapted_weights)
             print(f"  Finished adapting seed {seed}.")
         except Exception as e:
             print(f"    ERROR processing meta seed {seed}: {e}")
