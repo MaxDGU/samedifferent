@@ -169,8 +169,10 @@ def main(args):
                     
                     print(f"  Running t-SNE on {len(layer_weights)} layers...")
                     def pad_and_stack_layers(weights_list):
-                        # No padding needed if all layers are flattened, but good practice
-                        return np.array([w for w in weights_list if w.ndim > 0])
+                        """Pads a list of 1D arrays to the same length and stacks them."""
+                        if not weights_list: return None
+                        max_len = max(len(w) for w in weights_list)
+                        return np.vstack([np.pad(w, (0, max_len - len(w)), 'constant') for w in weights_list])
                     
                     weights_matrix_layer = pad_and_stack_layers(layer_weights)
                     tsne = TSNE(n_components=2, verbose=0, perplexity=min(30, len(layer_weights)-1), n_iter=1000, random_state=42)
