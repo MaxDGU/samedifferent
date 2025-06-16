@@ -103,7 +103,9 @@ def main(args):
     print(f"Loaded Vanilla-PB model from: {args.vanilla_model_path}")
 
     meta_model = MetaModel()
-    meta_model.load_state_dict(torch.load(args.meta_model_path, map_location='cpu'))
+    # The meta model checkpoint is a dictionary, we need to extract the state_dict
+    checkpoint = torch.load(args.meta_model_path, map_location='cpu')
+    meta_model.load_state_dict(checkpoint['model_state_dict'])
     print(f"Loaded Meta-PB model from: {args.meta_model_path}")
 
     # --- Get Pre-Adaptation Weights ---
