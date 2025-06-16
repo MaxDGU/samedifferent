@@ -167,6 +167,7 @@ def main(args):
         
         # Store pre-adaptation weights
         pre_weights = flatten_weights(model)
+        print(f"    - Pre-adaptation weight norm: {np.linalg.norm(pre_weights):.4f}")
         pre_adaptation_weights.append(pre_weights)
         
         # Adapt model
@@ -180,6 +181,7 @@ def main(args):
         
         # Store post-adaptation weights
         post_weights = flatten_weights(maml.module)
+        print(f"    - Post-adaptation weight norm: {np.linalg.norm(post_weights):.4f}")
         post_adaptation_weights.append(post_weights)
     
     print(f"--- Finished adapting MAML models. Processed {len(post_adaptation_weights)} models successfully. ---")
