@@ -17,7 +17,7 @@ echo "Conda environment activated."
 
 # --- Set Project Path ---
 # This is crucial for imports to work correctly
-export GIT_REPO_PATH="/scratch/gpfs/mg7411/samedifferent/samedifferent"
+export GIT_REPO_PATH="/scratch/gpfs/mg7411/samedifferent"
 export PYTHONPATH="${PYTHONPATH}:${GIT_REPO_PATH}"
 cd "${GIT_REPO_PATH}"
 echo "Current working directory: $(pwd)"

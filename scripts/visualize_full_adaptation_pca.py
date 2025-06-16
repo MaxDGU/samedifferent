@@ -124,7 +124,7 @@ def main(args):
     # 2. Load MAML Weights and Adapt Them
     print("\n--- Loading and Adapting MAML Model Weights ---")
     adaptation_loader = DataLoader(
-        LazyHDF5Dataset(data_path, transform=T.Compose([T.ToPILImage(), T.Resize((32, 32)), T.ToTensor()]), max_samples=args.max_adaptation_samples),
+        LazyHDF5Dataset(data_path, transform=T.Compose([T.ToPILImage(), T.Resize((35, 35)), T.ToTensor()]), max_samples=args.max_adaptation_samples),
         batch_size=args.adaptation_batch_size, shuffle=True
     )
     loss_func = torch.nn.CrossEntropyLoss()
