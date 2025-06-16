@@ -102,24 +102,45 @@ def main(args):
 
     # 1. Load Single-Task Weights
     print("\n--- Loading Single-Task Model Weights ---")
+    print(f"Base directory for single-task models: {single_task_dir}")
     PB_TASKS = ['regular', 'lines', 'open', 'wider_line', 'scrambled', 'random_color', 'arrows', 'irregular', 'filled', 'original']
     SEEDS_PER_TASK_IN_ORIG_EXP = 10 # This reflects the original experiment's folder structure
     SEEDS_TO_LOAD = range(5) # We only want to load the first 5 seeds for this analysis
+    single_task_weights_found = 0
 
     for task_idx, task_name in enumerate(PB_TASKS):
         for seed in SEEDS_TO_LOAD:
-            # This logic replicates the folder structure from the original training script,
-            # where seed folders had globally unique names.
+            # This logic replicates the folder structure from the original training script
             globally_unique_seed_for_folder = (task_idx * SEEDS_PER_TASK_IN_ORIG_EXP) + seed
-            model_path = single_task_dir / task_name / 'conv6' / f'seed_{globally_unique_seed_for_folder}' / 'best_model.pth'
-
-            if not model_path.exists(): continue
             
-            weights = load_and_flatten(model_path, StandardConv6)
-            if weights is not None:
-                all_weights.append(weights)
-                all_labels.append(f'Single-Task ({task_name})')
-                all_colors.append(single_task_color)
+            # Define potential model paths with both .pth and .pt extensions
+            base_path = single_task_dir / task_name / 'conv6' / f'seed_{globally_unique_seed_for_folder}' / 'best_model'
+            model_path_pth = base_path.with_suffix('.pth')
+            model_path_pt = base_path.with_suffix('.pt')
+            
+            model_path_to_load = None
+            
+            print(f"  - Checking for single-task model in: {base_path.parent}")
+
+            if model_path_pth.exists():
+                model_path_to_load = model_path_pth
+            elif model_path_pt.exists():
+                model_path_to_load = model_path_pt
+            
+            if model_path_to_load:
+                print(f"    - Found! Loading weights from {model_path_to_load}...")
+                weights = load_and_flatten(model_path_to_load, StandardConv6)
+                if weights is not None:
+                    all_weights.append(weights)
+                    all_labels.append(f'Single-Task ({task_name})')
+                    all_colors.append(single_task_color)
+                    single_task_weights_found += 1
+            else:
+                # This will now explicitly tell us which files it couldn't find
+                print(f"    - Not found.")
+
+
+    print(f"--- Finished loading single-task models. Found {single_task_weights_found} weight vectors. ---")
 
     # 2. Load MAML Weights and Adapt Them
     print("\n--- Loading and Adapting MAML Model Weights ---")
