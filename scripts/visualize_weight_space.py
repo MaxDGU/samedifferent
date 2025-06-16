@@ -37,30 +37,27 @@ def plot_results(results, labels, method_name, output_path, title, xlim=None, yl
     fig, ax = plt.subplots(figsize=(22, 20))
     
     unique_groups = sorted(list(set([l.split('-seed')[0] for l in labels])))
-    # Fix deprecation warning for get_cmap
     colors = plt.colormaps.get_cmap('tab20')(np.linspace(0, 1, len(unique_groups)))
     color_map = {group: colors[i] for i, group in enumerate(unique_groups)}
 
     for i, label in enumerate(labels):
         group_label = label.split('-seed')[0]
-        # Only plot points within the specified limits if provided
-        if xlim and not (xlim[0] <= results[i, 0] <= xlim[1]):
-            continue
-        if ylim and not (ylim[0] <= results[i, 1] <= ylim[1]):
-            continue
+        if xlim and not (xlim[0] <= results[i, 0] <= xlim[1]): continue
+        if ylim and not (ylim[0] <= results[i, 1] <= ylim[1]): continue
 
         ax.scatter(results[i, 0], results[i, 1], c=[color_map[group_label]], s=180, alpha=0.7)
         
-        is_tsne = "t-SNE" in title
-        # Use smaller font for the busy PCA plot
-        font_size = 8 if "PCA" in title and "Zoomed" in title else 12
-        label_text = group_label if is_tsne else label
-
-        if is_tsne:
-            if label not in labels[:i]:
-                 ax.text(results[i, 0], results[i, 1] + 0.05, label_text, fontsize=font_size, ha='center')
-        else:
-            ax.text(results[i, 0], results[i, 1] + 0.05, label_text, fontsize=font_size, ha='center')
+        font_size = 12
+        label_text = label # Show full label (e.g., with seed) on individual plots
+        
+        # Adjust label display based on plot type
+        if "PCA" in title:
+            label_text = group_label if "Zoomed" not in title else label
+            font_size = 8 if "Zoomed" in title else 12
+        elif "t-SNE" in title and len(unique_groups) > 1: # Combined t-SNE (if ever used)
+             label_text = group_label
+        
+        ax.text(results[i, 0], results[i, 1] + 0.05, label_text, fontsize=font_size, ha='center')
 
     from matplotlib.lines import Line2D
     legend_elements = [Line2D([0], [0], marker='o', color='w', label=group, markerfacecolor=color_map[group], markersize=14) for group in unique_groups]
@@ -71,15 +68,13 @@ def plot_results(results, labels, method_name, output_path, title, xlim=None, yl
     ax.set_ylabel(f"{method_name} Dimension 2", fontsize=16)
     ax.grid(True, which='both', linestyle='--', linewidth=0.5)
     
-    # Set plot limits if provided
-    if xlim:
-        ax.set_xlim(xlim)
-    if ylim:
-        ax.set_ylim(ylim)
+    if xlim: ax.set_xlim(xlim)
+    if ylim: ax.set_ylim(ylim)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, bbox_inches='tight')
-    print(f"\n{method_name} plot saved to {output_path}")
+    plt.close(fig) # Close the figure to free memory
+    print(f"\nPlot saved to {output_path}")
 
 def get_model_and_path(exp_type, model_arch, seed):
     """Returns the correct model class and file path."""
@@ -137,13 +132,15 @@ def main(args):
         }
     }
     
-    pca_weights, pca_labels = [], []
-    tsne_weights, tsne_labels = [], []
+    all_weights, all_labels = [], []
+    grouped_weights = {} # New dictionary to group weights by model type
     
     print("\n--- Loading and Flattening Model Weights ---")
     for exp_type, arch_seeds in seed_config.items():
         for model_arch, seeds in arch_seeds.items():
-            added_for_tsne = False
+            group_label = f"{exp_type}-{model_arch}"
+            grouped_weights[group_label] = {'weights': [], 'labels': []}
+
             for seed in seeds:
                 try:
                     model_class, path = get_model_and_path(exp_type, model_arch, seed)
@@ -153,22 +150,21 @@ def main(args):
                     print(f"  Processing {path}...")
                     
                     model = model_class()
-                    # Explicitly set weights_only=False to handle complex checkpoints
                     checkpoint = torch.load(path, map_location=torch.device("cpu"), weights_only=False)
-                    
-                    state_dict = checkpoint.get('model_state_dict') or checkpoint.get('state_dict') or checkpoint.get('model') or (checkpoint.get('net') and {k.replace('net.', ''): v for k, v in checkpoint['net'].items()}) or checkpoint
+                    state_dict = checkpoint.get('model_state_dict') or checkpoint.get('state_dict') or checkpoint
                     
                     model.load_state_dict(state_dict, strict=False)
                     flat_weights = flatten_weights(model)
-                    
-                    label = f"{exp_type}-{model_arch}-seed{seed}"
-                    pca_weights.append(flat_weights)
-                    pca_labels.append(label)
+                    label = f"{group_label}-seed{seed}"
 
-                    if not added_for_tsne:
-                        tsne_weights.append(flat_weights)
-                        tsne_labels.append(label)
-                        added_for_tsne = True
+                    # Add to master list for PCA
+                    all_weights.append(flat_weights)
+                    all_labels.append(label)
+                    
+                    # Add to grouped dictionary for individual t-SNE plots
+                    grouped_weights[group_label]['weights'].append(flat_weights)
+                    grouped_weights[group_label]['labels'].append(label)
+
                 except Exception as e:
                     print(f"    ERROR processing {exp_type}-{model_arch}-seed{seed}: {e}")
 
@@ -177,78 +173,47 @@ def main(args):
         max_len = max(len(w) for w in weights_list)
         return np.vstack([np.pad(w, (0, max_len - len(w)), 'constant') for w in weights_list])
 
-    if pca_weights:
-        weights_matrix_pca = pad_and_stack(pca_weights)
+    # --- PCA Section (on all weights) ---
+    if all_weights:
+        weights_matrix_pca = pad_and_stack(all_weights)
         print(f"\n--- Running PCA on {weights_matrix_pca.shape[0]} weight vectors (all seeds) ---")
         pca = PCA(n_components=2, random_state=42)
         results = pca.fit_transform(weights_matrix_pca)
         
-        # --- Plot 1: Full PCA view ---
-        plot_results(results, pca_labels, "PCA", args.output_dir / "weights_pca_all_seeds.png", "PCA Projection of All Model Weights (All Seeds)")
+        plot_results(results, all_labels, "PCA", args.output_dir / "weights_pca_all_seeds.png", "PCA Projection of All Model Weights (All Seeds)")
 
-        # --- Plot 2: Zoomed-in PCA view ---
-        # Find the dense cluster by filtering out outliers
-        x_coords = results[:, 0]
-        y_coords = results[:, 1]
+        x_coords, y_coords = results[:, 0], results[:, 1]
         x_mean, x_std = np.mean(x_coords), np.std(x_coords)
         y_mean, y_std = np.mean(y_coords), np.std(y_coords)
-        
-        # Define the zoom box as points within ~1 standard deviation of the mean
         zoom_mask = (np.abs(x_coords - x_mean) < x_std) & (np.abs(y_coords - y_mean) < y_std)
-        
-        # Calculate plot limits from the non-outlier points, with a small margin
         zoom_x_min, zoom_x_max = results[zoom_mask, 0].min() - 5, results[zoom_mask, 0].max() + 5
         zoom_y_min, zoom_y_max = results[zoom_mask, 1].min() - 5, results[zoom_mask, 1].max() + 5
+        plot_results(results, all_labels, "PCA", args.output_dir / "weights_pca_all_seeds_zoomed.png", "PCA Projection (Zoomed In)", xlim=(zoom_x_min, zoom_x_max), ylim=(zoom_y_min, zoom_y_max))
 
-        plot_results(results, pca_labels, "PCA", args.output_dir / "weights_pca_all_seeds_zoomed.png", "PCA Projection (Zoomed In)", xlim=(zoom_x_min, zoom_x_max), ylim=(zoom_y_min, zoom_y_max))
-
-        # Free up memory before running t-SNE
-        del pca_weights
-        del weights_matrix_pca
-        del results
-
-    if tsne_weights:
-        weights_matrix_tsne = pad_and_stack(tsne_weights)
-        print(f"\n--- Running t-SNE on {weights_matrix_tsne.shape[0]} weight vectors (one seed each) ---")
-        perplexity = min(30, weights_matrix_tsne.shape[0] - 1)
-        if perplexity > 0:
-            # Fix deprecation warning for n_iter
-            tsne = TSNE(n_components=2, verbose=1, perplexity=perplexity, max_iter=1000, random_state=42)
-            results = tsne.fit_transform(weights_matrix_tsne)
-            plot_results(results, tsne_labels, "t-SNE", args.output_dir / "weights_tsne_one_seed.png", "t-SNE Projection of Model Weights (One Seed per Type)")
-
-    # --- Generate individual t-SNE plots for each model type ---
+    # --- Individual t-SNE Section ---
     print("\n--- Generating individual t-SNE plots for each model group ---")
-    unique_groups = sorted(list(set([label.split('-seed')[0] for label in pca_labels])))
-
-    for group in unique_groups:
-        print(f"  Processing group: {group}")
-        group_indices = [i for i, label in enumerate(pca_labels) if label.startswith(group)]
-
-        if len(group_indices) < 2:
-            print(f"    Not enough data points for t-SNE ({len(group_indices)} found). Skipping.")
+    for group, data in grouped_weights.items():
+        group_weights = data['weights']
+        group_labels = data['labels']
+        
+        if len(group_weights) < 2:
+            print(f"  Group '{group}' has < 2 data points. Skipping t-SNE.")
             continue
-
-        group_weights = [pca_weights[i] for i in group_indices]
-        group_labels = [pca_labels[i] for i in group_indices]
-
-        weights_matrix_group = pad_and_stack(group_weights)
-
-        perplexity = min(30, weights_matrix_group.shape[0] - 1)
-        if perplexity > 0:
-            # verbose=0 to reduce log spam for many plots
-            tsne = TSNE(n_components=2, verbose=0, perplexity=perplexity, max_iter=1000, random_state=42)
-            results = tsne.fit_transform(weights_matrix_group)
             
-            output_filename = f"tsne_individual_{group}.png"
-            plot_title = f"t-SNE Projection for {group} (All Seeds)"
-            plot_results(results, group_labels, "t-SNE", args.output_dir / output_filename, plot_title)
-        else:
-            print(f"    Not enough data points for t-SNE. Skipping group {group}.")
+        print(f"  Running t-SNE for group: '{group}' ({len(group_weights)} seeds)")
+        weights_matrix_group = pad_and_stack(group_weights)
+        perplexity = min(30, weights_matrix_group.shape[0] - 1)
+        
+        tsne = TSNE(n_components=2, verbose=0, perplexity=perplexity, n_iter=1000, random_state=42)
+        results = tsne.fit_transform(weights_matrix_group)
+            
+        output_filename = f"tsne_individual_{group}.png"
+        plot_title = f"t-SNE Projection for {group} (All Seeds)"
+        plot_results(results, group_labels, "t-SNE", args.output_dir / output_filename, plot_title)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualize model weight space.")
-    parser.add_argument('--output_dir', type=Path, default=Path('/scratch/gpfs/mg7411/samedifferent/visualizations'),
-                        help='Directory to save the output plots.')
+    parser.add_argument('--output_dir', type=Path, default=Path.cwd() / 'visualizations' / 'weight_space',
+                        help="Directory to save the plots.")
     args = parser.parse_args()
     main(args) 
