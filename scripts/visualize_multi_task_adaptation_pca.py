@@ -125,42 +125,50 @@ def main(args):
     all_weights.extend(vanilla_post_weights_list)
     all_weights.extend(meta_post_weights_list)
 
-    # --- PCA and Plotting ---
-    print("\n--- Performing PCA and Plotting ---")
-    max_len = max(len(w) for w in all_weights)
-    padded_weights = np.vstack([np.pad(w, (0, max_len - len(w)), 'constant') for w in all_weights])
+    # --- PCA on Adaptation Vectors ---
+    print("\n--- Performing PCA on Adaptation Vectors ---")
+    vanilla_deltas = [post - vanilla_pre_weights for post in vanilla_post_weights_list]
+    meta_deltas = [post - meta_pre_weights for post in meta_post_weights_list]
+    all_deltas = vanilla_deltas + meta_deltas
+
+    max_len = max(len(d) for d in all_deltas)
+    padded_deltas = np.vstack([np.pad(d, (0, max_len - len(d)), 'constant') for d in all_deltas])
     
     pca = PCA(n_components=2, random_state=42)
-    pcs = pca.fit_transform(padded_weights)
-    
+    pcs = pca.fit_transform(padded_deltas)
+
+    # --- Plotting ---
+    print("\n--- Generating Plot ---")
     fig, ax = plt.subplots(figsize=(14, 12))
     
-    vanilla_pre_pc = pcs[0]
-    meta_pre_pc = pcs[1]
+    num_tasks_run = len(vanilla_deltas)
+    vanilla_pcs = pcs[:num_tasks_run]
+    meta_pcs = pcs[num_tasks_run:]
     
-    num_tasks_run = len(vanilla_post_weights_list)
-    vanilla_post_pcs = pcs[2 : 2 + num_tasks_run]
-    meta_post_pcs = pcs[2 + num_tasks_run :]
+    # Plot spokes from origin
+    origin = np.array([0, 0])
 
     # Plot Vanilla
-    ax.scatter(vanilla_pre_pc[0], vanilla_pre_pc[1], c='royalblue', s=300, alpha=0.9, marker='o', label='Vanilla Start')
-    for i, task_name in enumerate(tasks):
-        ax.scatter(vanilla_post_pcs[i, 0], vanilla_post_pcs[i, 1], c='royalblue', s=100, marker='X')
-        ax.arrow(vanilla_pre_pc[0], vanilla_pre_pc[1], vanilla_post_pcs[i, 0] - vanilla_pre_pc[0], vanilla_post_pcs[i, 1] - vanilla_pre_pc[1], color='royalblue', ls='--', lw=1.5, head_width=0.1)
+    for i in range(num_tasks_run):
+        ax.arrow(origin[0], origin[1], vanilla_pcs[i, 0], vanilla_pcs[i, 1], 
+                 color='royalblue', ls='--', lw=1.5, head_width=0.2, label='Vanilla Adaptation' if i == 0 else "")
 
     # Plot Meta
-    ax.scatter(meta_pre_pc[0], meta_pre_pc[1], c='darkorange', s=300, alpha=0.9, marker='o', label='Meta Start')
-    for i, task_name in enumerate(tasks):
-        ax.scatter(meta_post_pcs[i, 0], meta_post_pcs[i, 1], c='darkorange', s=100, marker='X')
-        ax.arrow(meta_pre_pc[0], meta_pre_pc[1], meta_post_pcs[i, 0] - meta_pre_pc[0], meta_post_pcs[i, 1] - meta_pre_pc[1], color='darkorange', ls='--', lw=1.5, head_width=0.1)
+    for i in range(num_tasks_run):
+        ax.arrow(origin[0], origin[1], meta_pcs[i, 0], meta_pcs[i, 1], 
+                 color='darkorange', ls='-', lw=2, head_width=0.2, label='Meta Adaptation' if i == 0 else "")
 
-    ax.set_title('Multi-Task Adaptation Trajectories (Shared PCA Space)', fontsize=18)
-    ax.set_xlabel('Principal Component 1', fontsize=14)
-    ax.set_ylabel('Principal Component 2', fontsize=14)
+    ax.scatter(origin[0], origin[1], c='black', s=150, zorder=5, marker='o', label='Shared Start Point')
+    
+    ax.set_title('PCA of Adaptation Vectors from a Common Origin', fontsize=18)
+    ax.set_xlabel(f'Principal Component of Adaptation 1 ({pca.explained_variance_ratio_[0]:.2%})', fontsize=14)
+    ax.set_ylabel(f'Principal Component of Adaptation 2 ({pca.explained_variance_ratio_[1]:.2%})', fontsize=14)
     ax.legend(fontsize=12)
     ax.grid(True)
+    ax.axhline(0, color='grey', lw=0.5)
+    ax.axvline(0, color='grey', lw=0.5)
     
-    plot_path = output_dir / 'multi_task_adaptation_pca.png'
+    plot_path = output_dir / 'multi_task_adaptation_delta_pca.png'
     plt.savefig(plot_path, bbox_inches='tight')
     print(f"\nPlot saved to {plot_path}")
 
