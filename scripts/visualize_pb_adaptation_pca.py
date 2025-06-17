@@ -66,18 +66,26 @@ def flatten_weights(model):
     return np.concatenate([p.cpu().detach().numpy().flatten() for p in model.parameters()])
 
 def adapt_model(model, loader, device, lr, steps):
-    """Performs adaptation and returns the adapted model."""
-    model.to(device)
-    loss_func = torch.nn.CrossEntropyLoss()
-    maml_wrapper = l2l.algorithms.MAML(model, lr=lr, first_order=True)
+    """Performs adaptation on a cloned model and returns the adapted clone."""
+    learner = l2l.clone_module(model)
+    learner.to(device)
     
+    optimizer = torch.optim.Adam(learner.parameters(), lr=lr)
+    loss_func = torch.nn.CrossEntropyLoss()
+
+    learner.train()
     for _ in range(steps):
         for batch_images, batch_labels in loader:
             batch_images, batch_labels = batch_images.to(device), batch_labels.to(device)
-            error = loss_func(maml_wrapper(batch_images), batch_labels)
-            maml_wrapper.adapt(error, allow_unused=True)
             
-    return maml_wrapper.learner
+            optimizer.zero_grad()
+            predictions = learner(batch_images)
+            error = loss_func(predictions, batch_labels)
+            error.backward()
+            optimizer.step()
+            
+    learner.eval()
+    return learner
 
 def check_and_report_nan(weights, context_msg):
     """Checks for NaN in a numpy array and prints a message if found."""
