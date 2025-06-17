@@ -29,8 +29,8 @@ python scripts/visualize_adaptation_performance.py \
     --meta_models_dir "/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6" \
     --data_dir "/scratch/gpfs/mg7411/samedifferent/data/naturalistic" \
     --output_dir "/scratch/gpfs/mg7411/samedifferent/visualizations/adaptation_performance" \
-    --lr 0.001 \
-    --adaptation_steps 20 \
+    --lr 0.01 \
+    --adaptation_steps 100 \
     --batch_size 64
 
 echo "Job finished with exit code $? at $(date)" 
