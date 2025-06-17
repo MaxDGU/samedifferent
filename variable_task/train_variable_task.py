@@ -381,7 +381,7 @@ def main(args):
 
     # --- Initialize Model and Meta-Learning Framework ---
     ModelClass = ARCHITECTURES[args.architecture]
-    model = ModelClass(img_size=128, in_channels=3)
+    model = ModelClass()
     model.to(device)
     maml = l2l.algorithms.MAML(model, lr=args.inner_lr, first_order=args.first_order, allow_nograd=True)
     
