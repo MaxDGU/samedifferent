@@ -168,6 +168,8 @@ if __name__ == '__main__':
                         help="Absolute path to the PB HDF5 data on the Slurm cluster.")
     parser.add_argument('--dry_run', action='store_true',
                         help="Generate scripts but do not submit them.")
+    parser.add_argument('--test', action='store_true',
+                        help="Run only the first job in the array for testing purposes.")
 
     args = parser.parse_args()
 
@@ -187,6 +189,24 @@ if __name__ == '__main__':
     )
 
     print(f"Generated Slurm array script: {script_path}")
+    
+    if args.test:
+        print("--- TEST MODE ---")
+        print("Modifying script to run only job #0.")
+        # Read the generated script
+        with open(script_path, 'r') as f:
+            lines = f.readlines()
+        # Find and replace the #SBATCH --array line
+        for i, line in enumerate(lines):
+            if line.strip().startswith("#SBATCH --array"):
+                lines[i] = "#SBATCH --array=0\n"
+                break
+        # Write the modified script back
+        with open(script_path, 'w') as f:
+            f.writelines(lines)
+        print(f"Modified {script_path} for a single test job.")
+        total_jobs = 1
+
     print(f"This will submit a single array job with {total_jobs} tasks.")
 
     if not args.dry_run:
