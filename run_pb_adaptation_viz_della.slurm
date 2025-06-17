@@ -30,8 +30,6 @@ python scripts/visualize_pb_adaptation_pca.py \
     --data_path "/scratch/gpfs/mg7411/data/pb/pb/arrows_support6_train.h5" \
     --output_dir "/scratch/gpfs/mg7411/samedifferent/visualizations/adaptation_pca" \
     --lr 0.001 \
-    --vanilla_seed 0 \
-    --meta_seed 3 \
     --steps 5 \
     --adaptation_batch_size 64
 
