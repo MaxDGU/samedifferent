@@ -1,7 +1,7 @@
 import os
 import subprocess
 from pathlib import Path
-import json
+import itertools
 
 # --- Experiment Configuration ---
 # The specific architecture to use for this experiment
@@ -14,46 +14,44 @@ ALL_PB_TASKS = [
 # Seeds to run for each task subset
 SEEDS = [123, 42, 555, 789, 999] # 5 seeds
 # Number of tasks to use in each meta-training run
-NUM_TASKS_TO_RUN = list(range(1, len(ALL_PB_TASKS) + 1)) # 1 to 10 tasks
+NUM_TASKS_LEVELS = list(range(1, len(ALL_PB_TASKS) + 1)) # 1 to 10 tasks
 
-# --- SLURM Script Template ---
-def create_slurm_script(output_base_dir, base_code_dir_on_cluster, data_dir_on_cluster,
-                          num_tasks, arch, seed,
-                          epochs=100,
-                          patience=20,
-                          val_freq=5,
-                          slurm_time="04:00:00",
-                          num_workers=4,
-                          first_order=True,
-                          inner_lr=0.01,
-                          outer_lr=0.001,
-                          meta_batch_size=4,
-                          use_amp=True,
-                          adaptation_steps_train=5,
-                          adaptation_steps_test=15,
-                          weight_decay=0.01):
-    """Creates a single Slurm job script for one experiment run."""
+# --- SLURM Array Script ---
+def create_array_script(output_base_dir, base_code_dir_on_cluster, data_dir_on_cluster,
+                        epochs=100,
+                        patience=20,
+                        val_freq=5,
+                        slurm_time="04:00:00",
+                        num_workers=4,
+                        first_order=True,
+                        inner_lr=0.01,
+                        outer_lr=0.001,
+                        meta_batch_size=4,
+                        use_amp=True,
+                        adaptation_steps_train=5,
+                        adaptation_steps_test=15,
+                        weight_decay=0.01):
+    """Creates a single Slurm array script for all experiment runs."""
     
-    # Select a subset of tasks for this run
-    # To ensure consistency, we'll use a fixed ordering of tasks
-    tasks_for_run = ALL_PB_TASKS[:num_tasks]
-    tasks_str = " ".join(tasks_for_run)
+    num_seeds = len(SEEDS)
+    num_task_levels = len(NUM_TASKS_LEVELS)
+    total_jobs = num_seeds * num_task_levels
 
-    job_name = f"var_tasks_{arch}_s{seed}_{num_tasks}t"
-    
-    # Define a unique output directory for this specific job's Slurm logs
+    job_name = f"var_tasks_{ARCHITECTURE}"
     slurm_log_dir = Path(output_base_dir) / "slurm_logs" / job_name
     slurm_log_dir.mkdir(parents=True, exist_ok=True)
 
-    # The actual training script to be called
     training_script_path = Path(base_code_dir_on_cluster) / "variable_task" / "train_variable_task.py"
+
+    # Convert Python lists to bash array strings
+    seeds_str = " ".join(map(str, SEEDS))
+    num_tasks_levels_str = " ".join(map(str, NUM_TASKS_LEVELS))
+    all_pb_tasks_str = " ".join(ALL_PB_TASKS)
 
     script_args = [
         f"--data_dir {data_dir_on_cluster}",
         f"--output_base_dir {output_base_dir}",
-        f"--architecture {arch}",
-        f"--seed {seed}",
-        f"--tasks {tasks_str}",
+        f"--architecture {ARCHITECTURE}",
         f"--epochs {epochs}",
         f"--patience {patience}",
         f"--val_freq {val_freq}",
@@ -74,8 +72,9 @@ def create_slurm_script(output_base_dir, base_code_dir_on_cluster, data_dir_on_c
 
     script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
-#SBATCH --output={slurm_log_dir}/slurm_%j.out
-#SBATCH --error={slurm_log_dir}/slurm_%j.err
+#SBATCH --array=0-{total_jobs - 1}
+#SBATCH --output={slurm_log_dir}/slurm_%A_%a.out
+#SBATCH --error={slurm_log_dir}/slurm_%A_%a.err
 #SBATCH --time={slurm_time}
 #SBATCH --mem=16G
 #SBATCH --partition=pli
@@ -83,6 +82,31 @@ def create_slurm_script(output_base_dir, base_code_dir_on_cluster, data_dir_on_c
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task={num_workers}
 
+# --- Bash Arrays for Seeds and Task Counts ---
+declare -a SEEDS=({seeds_str})
+declare -a NUM_TASKS_LEVELS=({num_tasks_levels_str})
+declare -a ALL_PB_TASKS=({all_pb_tasks_str})
+
+# --- Task Indexing ---
+NUM_SEEDS={num_seeds}
+seed_idx=$((SLURM_ARRAY_TASK_ID / {num_task_levels}))
+task_level_idx=$((SLURM_ARRAY_TASK_ID % {num_task_levels}))
+
+SEED=${{SEEDS[$seed_idx]}}
+NUM_TASKS=${{NUM_TASKS_LEVELS[$task_level_idx]}}
+
+# --- Select Tasks ---
+TASKS_FOR_RUN=("${{ALL_PB_TASKS[@]:0:$NUM_TASKS}}")
+
+echo "--- Job Details ---"
+echo "SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
+echo "Architecture: {ARCHITECTURE}"
+echo "Seed: $SEED"
+echo "Number of Tasks: $NUM_TASKS"
+echo "Tasks: ${{TASKS_FOR_RUN[*]}}"
+echo "-------------------"
+
+# --- Environment Setup ---
 echo "Loading modules..."
 module load anaconda3/2024.2
 module load cuda/11.7.0
@@ -90,19 +114,25 @@ module load cuda/11.7.0
 echo "Activating conda environment..."
 conda activate tensorflow
 
-echo "Running variable task training job for: Arch={arch}, Seed={seed}, NumTasks={num_tasks}"
+# Fix for ModuleNotFoundError by adding project root to PYTHONPATH
+echo "Setting PYTHONPATH..."
+export PYTHONPATH={base_code_dir_on_cluster}:$PYTHONPATH
+
+# --- Run Training Script ---
+echo "Running variable task training job..."
 python {training_script_path} \\
+    --seed $SEED \\
+    --tasks ${{TASKS_FOR_RUN[*]}} \\
     {script_args_str}
 
 echo "Job finished."
 """
     
-    # Save the script to a file
-    script_path = slurm_log_dir / f"{job_name}.sh"
+    script_path = slurm_log_dir / f"{job_name}_array.sh"
     with open(script_path, 'w') as f:
         f.write(script)
     os.chmod(script_path, 0o755)
-    return script_path
+    return script_path, total_jobs
 
 # --- Job Submission ---
 def submit_job(script_path):
@@ -111,11 +141,10 @@ def submit_job(script_path):
         cmd = ['sbatch', str(script_path)]
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         job_id = result.stdout.strip().split()[-1]
-        print(f"Submitted job {job_id} from script: {script_path}")
+        print(f"Submitted array job {job_id} from script: {script_path}")
         return job_id
     except subprocess.CalledProcessError as e:
-        print(f"Error submitting job from script {script_path}: {e}")
-        print(f"Stderr: {e.stderr}")
+        print(f"Error submitting job from script {script_path}: {e}\nStderr: {e.stderr}")
         return None
     except FileNotFoundError:
         print("Error: 'sbatch' command not found. Are you on a Slurm login node?")
@@ -124,7 +153,7 @@ def submit_job(script_path):
 # --- Main Execution ---
 if __name__ == '__main__':
     import argparse
-    parser = argparse.ArgumentParser(description="Run variable-task meta-training experiments.")
+    parser = argparse.ArgumentParser(description="Run variable-task meta-training experiments using a Slurm array job.")
     
     script_dir = Path(__file__).parent.resolve()
     default_code_dir = script_dir.parent
@@ -146,39 +175,26 @@ if __name__ == '__main__':
     code_base_cluster = Path(args.base_code_dir_cluster).resolve()
     data_dir_cluster = Path(args.data_dir_cluster).resolve()
 
+    print(f"Generating Slurm array script...")
     print(f"Output directory: {output_base}")
     print(f"Code directory on cluster: {code_base_cluster}")
     print(f"Data directory on cluster: {data_dir_cluster}")
 
-    submitted_jobs = []
-    for num_tasks in NUM_TASKS_TO_RUN:
-        for seed in SEEDS:
-            print(f"\n--- Preparing job: {ARCHITECTURE}, {seed=}, {num_tasks=} tasks ---")
-            
-            script_path = create_slurm_script(
-                output_base_dir=output_base,
-                base_code_dir_on_cluster=code_base_cluster,
-                data_dir_on_cluster=data_dir_cluster,
-                num_tasks=num_tasks,
-                arch=ARCHITECTURE,
-                seed=seed
-            )
+    script_path, total_jobs = create_array_script(
+        output_base_dir=output_base,
+        base_code_dir_on_cluster=code_base_cluster,
+        data_dir_on_cluster=data_dir_cluster
+    )
 
-            print(f"Generated Slurm script: {script_path}")
+    print(f"Generated Slurm array script: {script_path}")
+    print(f"This will submit a single array job with {total_jobs} tasks.")
 
-            if not args.dry_run:
-                job_id = submit_job(script_path)
-                if job_id:
-                    submitted_jobs.append(job_id)
-            else:
-                print("DRY RUN: Skipping job submission.")
-
-    print("\n--- Summary ---")
     if not args.dry_run:
-        print(f"Total jobs submitted: {len(submitted_jobs)}")
-        if submitted_jobs:
-            print("Submitted job IDs:", " ".join(submitted_jobs))
-        print(f"Check job status with: squeue -u $USER")
+        job_id = submit_job(script_path)
+        if job_id:
+            print(f"\nSuccessfully submitted array job {job_id}.")
+            print(f"Check job status with: squeue -j {job_id}")
     else:
-        print("DRY RUN complete. No jobs were submitted.")
+        print("\nDRY RUN complete. No job was submitted.")
+    
     print(f"All outputs will be located under: {output_base}") 
