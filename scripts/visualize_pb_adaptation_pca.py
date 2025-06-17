@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import sys
 from torchvision import transforms as T
 from torch.utils.data import Dataset, DataLoader
+import copy
 
 # --- Setup Project Path ---
 project_root = Path(__file__).resolve().parent.parent
@@ -67,7 +68,7 @@ def flatten_weights(model):
 
 def adapt_model(model, loader, device, lr, steps):
     """Performs adaptation on a cloned model and returns the adapted clone."""
-    learner = l2l.clone_module(model)
+    learner = copy.deepcopy(model)
     learner.to(device)
     
     optimizer = torch.optim.Adam(learner.parameters(), lr=lr)
