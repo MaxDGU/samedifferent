@@ -11,7 +11,7 @@ import matplotlib.patches as mpatches
 # --- Setup Project Path ---
 # This is a bit of a hack to make sure we can import the necessary modules
 # without having to install the package.
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(PROJECT_ROOT))
 
 # --- Model Imports ---
