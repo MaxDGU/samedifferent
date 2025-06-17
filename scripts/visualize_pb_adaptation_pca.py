@@ -102,76 +102,66 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Define the seeds to iterate over
-    vanilla_seeds = [0, 1, 2, 3, 4]
-    meta_seeds = [3, 4, 5, 6, 7]
-    print(f"Processing Vanilla seeds: {vanilla_seeds}")
-    print(f"Processing Meta seeds: {meta_seeds}")
-
     # --- Load Data ---
     transform_vanilla = T.Compose([T.ToPILImage(), T.Resize((128, 128)), T.ToTensor()])
     transform_meta = T.Compose([T.ToPILImage(), T.Resize((35, 35)), T.ToTensor()])
     loader_vanilla = DataLoader(SimpleHDF5Dataset(args.data_path, transform=transform_vanilla), batch_size=args.adaptation_batch_size, shuffle=True)
     loader_meta = DataLoader(SimpleHDF5Dataset(args.data_path, transform=transform_meta), batch_size=args.adaptation_batch_size, shuffle=True)
 
-    # Lists to store all weight vectors
-    all_weights_vanilla_pre = []
-    all_weights_vanilla_post = []
-    all_weights_meta_pre = []
-    all_weights_meta_post = []
+    # Lists to store the four key weight vectors
+    all_weights = []
 
-    # --- Loop and Adapt Vanilla Models ---
-    print("\n--- Processing Vanilla-PB Models ---")
-    for seed in vanilla_seeds:
-        try:
-            path = Path(args.vanilla_models_dir) / f"regular/conv6/seed_{seed}/initial_model.pth"
-            print(f"  Loading model for seed {seed} from {path}...")
-            model = VanillaModel()
-            model.load_state_dict(torch.load(path, map_location='cpu'))
+    # --- Process Vanilla Model ---
+    print(f"\n--- Processing Vanilla-PB Model (Seed: {args.vanilla_seed}) ---")
+    try:
+        path = Path(args.vanilla_models_dir) / f"regular/conv6/seed_{args.vanilla_seed}/initial_model.pth"
+        print(f"  Loading model from {path}...")
+        model = VanillaModel()
+        model.load_state_dict(torch.load(path, map_location='cpu'))
+        
+        initial_weights = flatten_weights(model)
+        all_weights.append(initial_weights)
+        
+        adapted_model = adapt_model(model, loader_vanilla, device, args.lr, args.steps)
+        adapted_weights = flatten_weights(adapted_model)
+        all_weights.append(adapted_weights)
+        print("  Finished adapting vanilla model.")
+        
+        # Diagnostic: Print change in norm
+        vanilla_dist = np.linalg.norm(adapted_weights - initial_weights)
+        print(f"  Distance for Vanilla (Seed {args.vanilla_seed}): {vanilla_dist:.4f}")
 
-            # Check for NaNs in initial weights
-            initial_weights = flatten_weights(model)
-            check_and_report_nan(initial_weights, f"in initial Vanilla model, seed {seed}")
-            all_weights_vanilla_pre.append(initial_weights)
-            
-            adapted_model = adapt_model(model, loader_vanilla, device, args.vanilla_lr, args.steps)
+    except Exception as e:
+        print(f"    ERROR processing vanilla seed {args.vanilla_seed}: {e}")
+        sys.exit(1)
 
-            # Check for NaNs in adapted weights
-            adapted_weights = flatten_weights(adapted_model)
-            check_and_report_nan(adapted_weights, f"after adapting Vanilla model, seed {seed}")
-            all_weights_vanilla_post.append(adapted_weights)
-            print(f"  Finished adapting seed {seed}.")
-        except Exception as e:
-            print(f"    ERROR processing vanilla seed {seed}: {e}")
+    # --- Process Meta Model ---
+    print(f"\n--- Processing Meta-PB Model (Seed: {args.meta_seed}) ---")
+    try:
+        path = Path(args.meta_models_dir) / f"model_seed_{args.meta_seed}_pretesting.pt"
+        print(f"  Loading model from {path}...")
+        model = MetaModel()
+        checkpoint = torch.load(path, map_location='cpu')
+        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
 
-    # --- Loop and Adapt Meta Models ---
-    print("\n--- Processing Meta-PB Models ---")
-    for seed in meta_seeds:
-        try:
-            path = Path(args.meta_models_dir) / f"model_seed_{seed}_pretesting.pt"
-            print(f"  Loading model for seed {seed} from {path}...")
-            model = MetaModel()
-            checkpoint = torch.load(path, map_location='cpu')
-            model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        initial_weights = flatten_weights(model)
+        all_weights.append(initial_weights)
 
-            # Check for NaNs in initial weights
-            initial_weights = flatten_weights(model)
-            check_and_report_nan(initial_weights, f"in initial Meta model, seed {seed}")
-            all_weights_meta_pre.append(initial_weights)
+        adapted_model = adapt_model(model, loader_meta, device, args.lr, args.steps)
+        adapted_weights = flatten_weights(adapted_model)
+        all_weights.append(adapted_weights)
+        print("  Finished adapting meta model.")
 
-            adapted_model = adapt_model(model, loader_meta, device, args.meta_lr, args.steps)
+        # Diagnostic: Print change in norm
+        meta_dist = np.linalg.norm(adapted_weights - initial_weights)
+        print(f"  Distance for Meta (Seed {args.meta_seed}): {meta_dist:.4f}")
 
-            # Check for NaNs in adapted weights
-            adapted_weights = flatten_weights(adapted_model)
-            check_and_report_nan(adapted_weights, f"after adapting Meta model, seed {seed}")
-            all_weights_meta_post.append(adapted_weights)
-            print(f"  Finished adapting seed {seed}.")
-        except Exception as e:
-            print(f"    ERROR processing meta seed {seed}: {e}")
+    except Exception as e:
+        print(f"    ERROR processing meta seed {args.meta_seed}: {e}")
+        sys.exit(1)
 
     # --- PCA Analysis ---
     print("\n--- Performing PCA ---")
-    all_weights = all_weights_vanilla_pre + all_weights_vanilla_post + all_weights_meta_pre + all_weights_meta_post
     
     max_len = max(len(w) for w in all_weights)
     padded_weights = np.vstack([np.pad(w, (0, max_len - len(w)), 'constant') for w in all_weights])
@@ -182,51 +172,39 @@ def main(args):
     # --- Plotting ---
     print("--- Generating Plot ---")
     plt.style.use('seaborn-v0_8-whitegrid')
-    fig, ax = plt.subplots(figsize=(14, 12))
+    fig, ax = plt.subplots(figsize=(12, 10))
     
     vanilla_color, meta_color = 'royalblue', 'darkorange'
     
-    # Split PCs for plotting
-    num_vanilla = len(all_weights_vanilla_pre)
-    num_meta = len(all_weights_meta_pre)
-    vanilla_pre_pc = pcs[:num_vanilla]
-    vanilla_post_pc = pcs[num_vanilla:2*num_vanilla]
-    meta_pre_pc = pcs[2*num_vanilla : 2*num_vanilla + num_meta]
-    meta_post_pc = pcs[2*num_vanilla + num_meta:]
+    # Extract PCs: [vanilla_pre, vanilla_post, meta_pre, meta_post]
+    vanilla_pre_pc, vanilla_post_pc = pcs[0], pcs[1]
+    meta_pre_pc, meta_post_pc = pcs[2], pcs[3]
 
-    # Plot arrows and points
-    for i in range(num_vanilla):
-        ax.scatter(vanilla_pre_pc[i, 0], vanilla_pre_pc[i, 1], c=vanilla_color, s=150, alpha=0.5)
-        ax.scatter(vanilla_post_pc[i, 0], vanilla_post_pc[i, 1], c=vanilla_color, s=150, alpha=1.0, marker='X')
-        ax.arrow(vanilla_pre_pc[i, 0], vanilla_pre_pc[i, 1], vanilla_post_pc[i, 0] - vanilla_pre_pc[i, 0], vanilla_post_pc[i, 1] - vanilla_pre_pc[i, 1], color=vanilla_color, ls='--', lw=1.5, head_width=0.1)
+    # Plot Vanilla Trajectory
+    ax.scatter(vanilla_pre_pc[0], vanilla_pre_pc[1], c=vanilla_color, s=200, alpha=0.6, label='Vanilla Pre-Adapt')
+    ax.scatter(vanilla_post_pc[0], vanilla_post_pc[1], c=vanilla_color, s=200, marker='X', label='Vanilla Post-Adapt')
+    ax.arrow(vanilla_pre_pc[0], vanilla_pre_pc[1], vanilla_post_pc[0] - vanilla_pre_pc[0], vanilla_post_pc[1] - vanilla_pre_pc[1], 
+             color=vanilla_color, ls='--', lw=2, head_width=0.05 * abs(vanilla_post_pc[0] - vanilla_pre_pc[0])) # Adjusted head_width
 
-    for i in range(num_meta):
-        ax.scatter(meta_pre_pc[i, 0], meta_pre_pc[i, 1], c=meta_color, s=150, alpha=0.5)
-        ax.scatter(meta_post_pc[i, 0], meta_post_pc[i, 1], c=meta_color, s=150, alpha=1.0, marker='X')
-        ax.arrow(meta_pre_pc[i, 0], meta_pre_pc[i, 1], meta_post_pc[i, 0] - meta_pre_pc[i, 0], meta_post_pc[i, 1] - meta_pre_pc[i, 1], color=meta_color, ls='--', lw=1.5, head_width=0.1)
+    # Plot Meta Trajectory
+    ax.scatter(meta_pre_pc[0], meta_pre_pc[1], c=meta_color, s=200, alpha=0.6, label='Meta Pre-Adapt')
+    ax.scatter(meta_post_pc[0], meta_post_pc[1], c=meta_color, s=200, marker='X', label='Meta Post-Adapt')
+    ax.arrow(meta_pre_pc[0], meta_pre_pc[1], meta_post_pc[0] - meta_pre_pc[0], meta_post_pc[1] - meta_pre_pc[1], 
+             color=meta_color, ls='--', lw=2, head_width=0.05 * abs(meta_post_pc[0] - meta_pre_pc[0])) # Adjusted head_width
 
-    # Create custom legend
-    from matplotlib.lines import Line2D
-    legend_elements = [
-        Line2D([0], [0], marker='o', color='w', label='Vanilla Pre-Adapt', markerfacecolor=vanilla_color, markersize=12, alpha=0.5),
-        Line2D([0], [0], marker='X', color=vanilla_color, label='Vanilla Post-Adapt', markersize=10, lw=0),
-        Line2D([0], [0], marker='o', color='w', label='Meta Pre-Adapt', markerfacecolor=meta_color, markersize=12, alpha=0.5),
-        Line2D([0], [0], marker='X', color=meta_color, label='Meta Post-Adapt', markersize=10, lw=0)
-    ]
-    ax.legend(handles=legend_elements, loc='best', fontsize=12)
-
-    ax.set_title('PCA of Adaptation Trajectories: Vanilla vs. Meta-Learned Weights (Multiple Seeds)', fontsize=16)
-    ax.set_xlabel(f'Principal Component 1 ({pca.explained_variance_ratio_[0]:.2%})', fontsize=12)
-    ax.set_ylabel(f'Principal Component 2 ({pca.explained_variance_ratio_[1]:.2%})', fontsize=12)
+    ax.legend(loc='best', fontsize=12)
+    ax.set_title('PCA of Adaptation Trajectories: Vanilla vs. Meta-Learned', fontsize=18)
+    ax.set_xlabel(f'Principal Component 1 ({pca.explained_variance_ratio_[0]:.2%})', fontsize=14)
+    ax.set_ylabel(f'Principal Component 2 ({pca.explained_variance_ratio_[1]:.2%})', fontsize=14)
     ax.grid(True)
 
-    plot_path = output_dir / 'pb_adaptation_trajectories_pca_multiseed.png'
+    plot_path = output_dir / 'pb_adaptation_trajectory_single_seed.png'
     plt.savefig(plot_path, bbox_inches='tight')
     print(f"\nPlot saved to {plot_path}")
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Compare adaptation of Vanilla vs. Meta-trained models across multiple seeds.")
+    parser = argparse.ArgumentParser(description="Compare adaptation of a single Vanilla vs. Meta-trained model.")
     # Paths to model directories
     parser.add_argument('--vanilla_models_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/single_task/results/pb_single_task', help='Base directory for initial Vanilla-PB models.')
     parser.add_argument('--meta_models_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6', help='Directory for trained Meta-PB models.')
@@ -234,9 +212,10 @@ if __name__ == '__main__':
     parser.add_argument('--data_path', type=str, default='/scratch/gpfs/mg7411/data/pb/pb/arrows_support6_train.h5', help='Path to the HDF5 data for adaptation.')
     # Output and training parameters
     parser.add_argument('--output_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/visualizations/adaptation_pca', help='Directory to save the output plot.')
-    parser.add_argument('--meta_lr', type=float, default=0.01, help='Learning rate for meta model adaptation.')
-    parser.add_argument('--vanilla_lr', type=float, default=0.001, help='Learning rate for vanilla model adaptation.')
-    parser.add_argument('--steps', type=int, default=3, help='Number of adaptation epochs.')
+    parser.add_argument('--lr', type=float, default=0.001, help='Unified learning rate for adaptation.')
+    parser.add_argument('--vanilla_seed', type=int, default=0, help='Seed for the vanilla model.')
+    parser.add_argument('--meta_seed', type=int, default=3, help='Seed for the meta model.')
+    parser.add_argument('--steps', type=int, default=5, help='Number of adaptation epochs.')
     parser.add_argument('--adaptation_batch_size', type=int, default=64, help='Batch size for adaptation.')
     args = parser.parse_args()
     main(args) 
