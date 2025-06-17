@@ -10,6 +10,7 @@ import sys
 from torchvision import transforms as T
 from torch.utils.data import Dataset, DataLoader
 import copy
+from tqdm import tqdm
 
 # --- Setup Project Path ---
 project_root = Path(__file__).resolve().parent.parent
@@ -26,26 +27,41 @@ except ImportError as e:
 
 class NaturalisticDataset(Dataset):
     """
-    A simple dataset for loading images and labels from the naturalistic HDF5 files.
-    Reads top-level 'images' and 'labels' datasets.
+    Dataset for loading naturalistic data. It iterates through all 'episode_*'
+    groups in the HDF5 file, aggregating all support and query images/labels
+    into a single dataset for standard training or evaluation.
     """
     def __init__(self, h5_path, transform=None):
         self.h5_path = h5_path
         self.transform = transform
-        self._file = None
         
+        self.images = []
+        self.labels = []
+
+        print(f"  Aggregating data from {self.h5_path.name}...")
         with h5py.File(self.h5_path, 'r') as hf:
-            self.dataset_len = len(hf['images'])
+            episode_keys = sorted([k for k in hf.keys() if k.startswith('episode_')])
+            if not episode_keys:
+                raise ValueError(f"No episode groups found in {h5_path}")
+            
+            for key in tqdm(episode_keys, desc="  Loading episodes"):
+                ep_group = hf[key]
+                # Add support images and labels
+                self.images.extend(ep_group['support_images'][()])
+                self.labels.extend(ep_group['support_labels'][()])
+                # Add query images and labels
+                self.images.extend(ep_group['query_images'][()])
+                self.labels.extend(ep_group['query_labels'][()])
+        
+        self.dataset_len = len(self.labels)
+        print(f"  Finished aggregating. Total samples: {self.dataset_len}")
 
     def __len__(self):
         return self.dataset_len
 
     def __getitem__(self, idx):
-        if self._file is None:
-            self._file = h5py.File(self.h5_path, 'r')
-        
-        image = self._file['images'][idx]
-        label = self._file['labels'][idx]
+        image = self.images[idx]
+        label = self.labels[idx]
         
         if self.transform:
             image = self.transform(image)
