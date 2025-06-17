@@ -168,13 +168,18 @@ def main(args):
 
     # --- Analysis & Plotting ---
     if all_weights_vanilla_pre:
-        print("\n--- Performing PCA and Plotting for Vanilla Models ---")
-        all_vanilla_weights = all_weights_vanilla_pre + all_weights_vanilla_post
-        max_len_vanilla = max(len(w) for w in all_vanilla_weights)
-        padded_vanilla_weights = np.vstack([np.pad(w, (0, max_len_vanilla - len(w)), 'constant') for w in all_vanilla_weights])
-        
+        print("\n--- Performing PCA and Plotting for Vanilla Models (focused on adaptation) ---")
+        vanilla_deltas = [post - pre for pre, post in zip(all_weights_vanilla_pre, all_weights_vanilla_post)]
+        max_len_vanilla = max(len(w) for w in vanilla_deltas)
+        padded_vanilla_deltas = np.vstack([np.pad(w, (0, max_len_vanilla - len(w)), 'constant') for w in vanilla_deltas])
+
         pca_vanilla = PCA(n_components=2, random_state=42)
-        pcs_vanilla = pca_vanilla.fit_transform(padded_vanilla_weights)
+        pca_vanilla.fit(padded_vanilla_deltas) # Fit PCA on the adaptation vectors
+
+        all_vanilla_weights = all_weights_vanilla_pre + all_weights_vanilla_post
+        max_len_vanilla_all = max(len(w) for w in all_vanilla_weights)
+        padded_vanilla_all = np.vstack([np.pad(w, (0, max_len_vanilla_all - len(w)), 'constant') for w in all_vanilla_weights])
+        pcs_vanilla = pca_vanilla.transform(padded_vanilla_all) # Transform original points
         
         fig_vanilla, ax_vanilla = plt.subplots(figsize=(12, 10))
         num_vanilla = len(all_weights_vanilla_pre)
@@ -187,21 +192,26 @@ def main(args):
             ax_vanilla.arrow(vanilla_pre_pc[i, 0], vanilla_pre_pc[i, 1], vanilla_post_pc[i, 0] - vanilla_pre_pc[i, 0], vanilla_post_pc[i, 1] - vanilla_pre_pc[i, 1], color='royalblue', ls='--', lw=1.5, head_width=0.1)
         
         ax_vanilla.set_title('PCA of Adaptation Trajectories: Vanilla Models', fontsize=16)
-        ax_vanilla.set_xlabel(f'Principal Component 1 ({pca_vanilla.explained_variance_ratio_[0]:.2%})', fontsize=12)
-        ax_vanilla.set_ylabel(f'Principal Component 2 ({pca_vanilla.explained_variance_ratio_[1]:.2%})', fontsize=12)
+        ax_vanilla.set_xlabel(f'Principal Component of Adaptation 1 ({pca_vanilla.explained_variance_ratio_[0]:.2%})', fontsize=12)
+        ax_vanilla.set_ylabel(f'Principal Component of Adaptation 2 ({pca_vanilla.explained_variance_ratio_[1]:.2%})', fontsize=12)
         ax_vanilla.grid(True)
         vanilla_plot_path = output_dir / 'vanilla_adaptation_pca.png'
         plt.savefig(vanilla_plot_path, bbox_inches='tight')
         print(f"Vanilla plot saved to {vanilla_plot_path}")
 
     if all_weights_meta_pre:
-        print("\n--- Performing PCA and Plotting for Meta Models ---")
-        all_meta_weights = all_weights_meta_pre + all_weights_meta_post
-        max_len_meta = max(len(w) for w in all_meta_weights)
-        padded_meta_weights = np.vstack([np.pad(w, (0, max_len_meta - len(w)), 'constant') for w in all_meta_weights])
+        print("\n--- Performing PCA and Plotting for Meta Models (focused on adaptation) ---")
+        meta_deltas = [post - pre for pre, post in zip(all_weights_meta_pre, all_weights_meta_post)]
+        max_len_meta = max(len(w) for w in meta_deltas)
+        padded_meta_deltas = np.vstack([np.pad(w, (0, max_len_meta - len(w)), 'constant') for w in meta_deltas])
 
         pca_meta = PCA(n_components=2, random_state=42)
-        pcs_meta = pca_meta.fit_transform(padded_meta_weights)
+        pca_meta.fit(padded_meta_deltas) # Fit PCA on the adaptation vectors
+
+        all_meta_weights = all_weights_meta_pre + all_weights_meta_post
+        max_len_meta_all = max(len(w) for w in all_meta_weights)
+        padded_meta_all = np.vstack([np.pad(w, (0, max_len_meta_all - len(w)), 'constant') for w in all_meta_weights])
+        pcs_meta = pca_meta.transform(padded_meta_all) # Transform original points
 
         fig_meta, ax_meta = plt.subplots(figsize=(12, 10))
         num_meta = len(all_weights_meta_pre)
@@ -214,8 +224,8 @@ def main(args):
             ax_meta.arrow(meta_pre_pc[i, 0], meta_pre_pc[i, 1], meta_post_pc[i, 0] - meta_pre_pc[i, 0], meta_post_pc[i, 1] - meta_pre_pc[i, 1], color='darkorange', ls='--', lw=1.5, head_width=0.1)
 
         ax_meta.set_title('PCA of Adaptation Trajectories: Meta-Learned Models', fontsize=16)
-        ax_meta.set_xlabel(f'Principal Component 1 ({pca_meta.explained_variance_ratio_[0]:.2%})', fontsize=12)
-        ax_meta.set_ylabel(f'Principal Component 2 ({pca_meta.explained_variance_ratio_[1]:.2%})', fontsize=12)
+        ax_meta.set_xlabel(f'Principal Component of Adaptation 1 ({pca_meta.explained_variance_ratio_[0]:.2%})', fontsize=12)
+        ax_meta.set_ylabel(f'Principal Component of Adaptation 2 ({pca_meta.explained_variance_ratio_[1]:.2%})', fontsize=12)
         ax_meta.grid(True)
         meta_plot_path = output_dir / 'meta_adaptation_pca.png'
         plt.savefig(meta_plot_path, bbox_inches='tight')
