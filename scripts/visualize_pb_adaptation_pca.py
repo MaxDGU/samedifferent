@@ -166,60 +166,60 @@ def main(args):
         except Exception as e:
             print(f"    ERROR processing meta seed {seed}: {e}")
 
-    # --- PCA Analysis ---
-    print("\n--- Performing PCA ---")
-    all_weights = all_weights_vanilla_pre + all_weights_vanilla_post + all_weights_meta_pre + all_weights_meta_post
-    
-    max_len = max(len(w) for w in all_weights if w is not None)
-    padded_weights = np.vstack([np.pad(w, (0, max_len - len(w)), 'constant') for w in all_weights])
-    
-    pca = PCA(n_components=2, random_state=42)
-    pcs = pca.fit_transform(padded_weights)
-    
-    # --- Plotting ---
-    print("--- Generating Plot ---")
-    plt.style.use('seaborn-v0_8-whitegrid')
-    fig, ax = plt.subplots(figsize=(14, 12))
-    
-    vanilla_color, meta_color = 'royalblue', 'darkorange'
-    
-    # Split PCs for plotting
-    num_vanilla = len(all_weights_vanilla_pre)
-    num_meta = len(all_weights_meta_pre)
-    vanilla_pre_pc = pcs[:num_vanilla]
-    vanilla_post_pc = pcs[num_vanilla:2*num_vanilla]
-    meta_pre_pc = pcs[2*num_vanilla : 2*num_vanilla + num_meta]
-    meta_post_pc = pcs[2*num_vanilla + num_meta:]
+    # --- Analysis & Plotting ---
+    if all_weights_vanilla_pre:
+        print("\n--- Performing PCA and Plotting for Vanilla Models ---")
+        all_vanilla_weights = all_weights_vanilla_pre + all_weights_vanilla_post
+        max_len_vanilla = max(len(w) for w in all_vanilla_weights)
+        padded_vanilla_weights = np.vstack([np.pad(w, (0, max_len_vanilla - len(w)), 'constant') for w in all_vanilla_weights])
+        
+        pca_vanilla = PCA(n_components=2, random_state=42)
+        pcs_vanilla = pca_vanilla.fit_transform(padded_vanilla_weights)
+        
+        fig_vanilla, ax_vanilla = plt.subplots(figsize=(12, 10))
+        num_vanilla = len(all_weights_vanilla_pre)
+        vanilla_pre_pc = pcs_vanilla[:num_vanilla]
+        vanilla_post_pc = pcs_vanilla[num_vanilla:]
 
-    # Plot arrows and points
-    for i in range(num_vanilla):
-        ax.scatter(vanilla_pre_pc[i, 0], vanilla_pre_pc[i, 1], c=vanilla_color, s=150, alpha=0.5)
-        ax.scatter(vanilla_post_pc[i, 0], vanilla_post_pc[i, 1], c=vanilla_color, s=150, alpha=1.0, marker='X')
-        ax.arrow(vanilla_pre_pc[i, 0], vanilla_pre_pc[i, 1], vanilla_post_pc[i, 0] - vanilla_pre_pc[i, 0], vanilla_post_pc[i, 1] - vanilla_pre_pc[i, 1], color=vanilla_color, ls='--', lw=1.5, head_width=0.1)
+        for i in range(num_vanilla):
+            ax_vanilla.scatter(vanilla_pre_pc[i, 0], vanilla_pre_pc[i, 1], c='royalblue', s=150, alpha=0.6)
+            ax_vanilla.scatter(vanilla_post_pc[i, 0], vanilla_post_pc[i, 1], c='royalblue', s=150, marker='X')
+            ax_vanilla.arrow(vanilla_pre_pc[i, 0], vanilla_pre_pc[i, 1], vanilla_post_pc[i, 0] - vanilla_pre_pc[i, 0], vanilla_post_pc[i, 1] - vanilla_pre_pc[i, 1], color='royalblue', ls='--', lw=1.5, head_width=0.1)
+        
+        ax_vanilla.set_title('PCA of Adaptation Trajectories: Vanilla Models', fontsize=16)
+        ax_vanilla.set_xlabel(f'Principal Component 1 ({pca_vanilla.explained_variance_ratio_[0]:.2%})', fontsize=12)
+        ax_vanilla.set_ylabel(f'Principal Component 2 ({pca_vanilla.explained_variance_ratio_[1]:.2%})', fontsize=12)
+        ax_vanilla.grid(True)
+        vanilla_plot_path = output_dir / 'vanilla_adaptation_pca.png'
+        plt.savefig(vanilla_plot_path, bbox_inches='tight')
+        print(f"Vanilla plot saved to {vanilla_plot_path}")
 
-    for i in range(num_meta):
-        ax.scatter(meta_pre_pc[i, 0], meta_pre_pc[i, 1], c=meta_color, s=150, alpha=0.5)
-        ax.scatter(meta_post_pc[i, 0], meta_post_pc[i, 1], c=meta_color, s=150, alpha=1.0, marker='X')
-        ax.arrow(meta_pre_pc[i, 0], meta_pre_pc[i, 1], meta_post_pc[i, 0] - meta_pre_pc[i, 0], meta_post_pc[i, 1] - meta_pre_pc[i, 1], color=meta_color, ls='--', lw=1.5, head_width=0.1)
+    if all_weights_meta_pre:
+        print("\n--- Performing PCA and Plotting for Meta Models ---")
+        all_meta_weights = all_weights_meta_pre + all_weights_meta_post
+        max_len_meta = max(len(w) for w in all_meta_weights)
+        padded_meta_weights = np.vstack([np.pad(w, (0, max_len_meta - len(w)), 'constant') for w in all_meta_weights])
 
-    # Create custom legend
-    from matplotlib.lines import Line2D
-    legend_elements = [
-        Line2D([0], [0], marker='o', color='w', label='Vanilla Pre-Adapt', markerfacecolor=vanilla_color, markersize=12, alpha=0.5),
-        Line2D([0], [0], marker='X', color='w', label='Vanilla Post-Adapt', markerfacecolor=vanilla_color, markersize=12, markeredgecolor='k'),
-        Line2D([0], [0], marker='o', color='w', label='Meta Pre-Adapt', markerfacecolor=meta_color, markersize=12, alpha=0.5),
-        Line2D([0], [0], marker='X', color='w', label='Meta Post-Adapt', markerfacecolor=meta_color, markersize=12, markeredgecolor='k'),
-    ]
-    ax.legend(handles=legend_elements, loc='best', fontsize=12)
+        pca_meta = PCA(n_components=2, random_state=42)
+        pcs_meta = pca_meta.fit_transform(padded_meta_weights)
 
-    ax.set_title('PCA of Adaptation Trajectories: Vanilla vs. Meta-Learned (All Seeds)', fontsize=16)
-    ax.set_xlabel(f'Principal Component 1 ({pca.explained_variance_ratio_[0]:.2%})', fontsize=12)
-    ax.set_ylabel(f'Principal Component 2 ({pca.explained_variance_ratio_[1]:.2%})', fontsize=12)
-    ax.grid(True)
+        fig_meta, ax_meta = plt.subplots(figsize=(12, 10))
+        num_meta = len(all_weights_meta_pre)
+        meta_pre_pc = pcs_meta[:num_meta]
+        meta_post_pc = pcs_meta[num_meta:]
 
-    plot_path = output_dir / 'pb_adaptation_trajectories_pca_all_seeds.png'
-    plt.savefig(plot_path, bbox_inches='tight')
-    print(f"\nPlot saved to {plot_path}")
+        for i in range(num_meta):
+            ax_meta.scatter(meta_pre_pc[i, 0], meta_pre_pc[i, 1], c='darkorange', s=150, alpha=0.6)
+            ax_meta.scatter(meta_post_pc[i, 0], meta_post_pc[i, 1], c='darkorange', s=150, marker='X')
+            ax_meta.arrow(meta_pre_pc[i, 0], meta_pre_pc[i, 1], meta_post_pc[i, 0] - meta_pre_pc[i, 0], meta_post_pc[i, 1] - meta_pre_pc[i, 1], color='darkorange', ls='--', lw=1.5, head_width=0.1)
+
+        ax_meta.set_title('PCA of Adaptation Trajectories: Meta-Learned Models', fontsize=16)
+        ax_meta.set_xlabel(f'Principal Component 1 ({pca_meta.explained_variance_ratio_[0]:.2%})', fontsize=12)
+        ax_meta.set_ylabel(f'Principal Component 2 ({pca_meta.explained_variance_ratio_[1]:.2%})', fontsize=12)
+        ax_meta.grid(True)
+        meta_plot_path = output_dir / 'meta_adaptation_pca.png'
+        plt.savefig(meta_plot_path, bbox_inches='tight')
+        print(f"Meta plot saved to {meta_plot_path}")
 
     # --- Final Quantitative Summary ---
     print("\n--- Quantitative Analysis ---")
