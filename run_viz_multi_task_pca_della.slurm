@@ -17,7 +17,7 @@ echo "Starting job at: $(date)"
 mkdir -p logs
 
 # Load necessary modules
-module load anaconda3/2021.11
+module load anaconda3/2023.9
 conda activate tensorflow
 
 # Set PYTHONPATH to include the project root
