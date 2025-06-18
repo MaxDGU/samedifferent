@@ -18,7 +18,7 @@ mkdir -p logs
 
 # Load necessary modules
 module load anaconda3/2021.11
-source activate /scratch/gpfs/mg7411/conda-envs/l2l
+conda activate tensorflow
 
 # Set PYTHONPATH to include the project root
 export PYTHONPATH="${PWD}:${PYTHONPATH}"
