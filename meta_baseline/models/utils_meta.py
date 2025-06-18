@@ -40,7 +40,7 @@ class SameDifferentDataset(Dataset):
         for task in tasks:
             for support_size in support_sizes:
                 # Handle both PB and SVRT data paths
-                if 'svrt_fixed' in data_dir:
+                if 'svrt_fixed' in str(data_dir):
                     # SVRT test data path
                     file_path = os.path.join(data_dir, 
                                            f'results_problem_{task}',
