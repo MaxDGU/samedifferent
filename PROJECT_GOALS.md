@@ -80,4 +80,17 @@ Investigate the effectiveness of meta-learning compared to standard supervised l
 *   **Goal:** Analyze and visualize the learned weight spaces of meta-learned vs. vanilla-learned models using techniques like PCA.
 *   **Models:** Weights from relevant experiments (Baselines, Meta Baseline, etc.).
 *   **Method:** PCA, other visualization techniques.
-*   **Status:** In Progress (Focus on improving visualizations). 
+*   **Status:** In Progress (Focus on improving visualizations).
+
+## New Goals and Tasks
+
+### Goal 2: Analyze Weight Spaces of Pre-trained vs. Meta-trained Models
+Description: Compare the learned weight spaces of models trained with conventional supervised learning on single tasks versus those trained with MAML.
+- [X] Implement PCA and t-SNE analysis on the weights of `conv` models.
+
+## New Tasks
+
+- [X] Create a single Slurm array script generator in `run_variable_task_experiment.py` to handle all seed/task combinations.
+- [X] Add a `--test` flag to `run_variable_task_experiment.py` for safe, single-job dry runs.
+- [X] Resolve all runtime errors (`ModuleNotFoundError`, `TypeError`) identified during testing on Della.
+- [X] Create an aggregation and plotting script `variable_task/aggregate_and_plot_results.py` to analyze the results after the main experiment completes. 
