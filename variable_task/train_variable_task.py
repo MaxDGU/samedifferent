@@ -190,8 +190,8 @@ class VariableSupportSampler(Sampler):
 
 def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler, epoch_num, args):
     maml.train()
-    total_meta_loss = 0
-    total_meta_acc = 0
+    total_meta_loss = 0.0
+    total_meta_acc = 0.0
     num_meta_batches_processed = 0
     
     current_arch = args.architecture
@@ -284,8 +284,8 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
         
         print_debug_stats("PostOptimizerStep", current_arch, epoch_num, meta_batch_idx, maml_model=maml)
 
-        total_meta_loss += avg_query_loss_for_meta_batch
-        total_meta_acc += avg_query_acc_for_meta_batch
+        total_meta_loss += avg_query_loss_for_meta_batch.item()
+        total_meta_acc += avg_query_acc_for_meta_batch.item()
         num_meta_batches_processed += 1
 
         pbar.set_postfix(meta_loss=total_meta_loss / num_meta_batches_processed, 
@@ -458,9 +458,7 @@ def main(args):
         val_loss, val_acc = -1.0, -1.0
         run_validation = (epoch + 1) % args.val_freq == 0
         if run_validation:
-            val_loss_tensor, val_acc_tensor = validate_or_test(maml, val_loader, device, args.adaptation_steps_test, 'Validating', epoch)
-            val_loss = val_loss_tensor.item()
-            val_acc = val_acc_tensor.item()
+            val_loss, val_acc = validate_or_test(maml, val_loader, device, args.adaptation_steps_test, 'Validating', epoch)
             print(f"Epoch {epoch+1}/{args.epochs} | Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
             
             if val_acc > best_val_acc:
@@ -532,9 +530,10 @@ def main(args):
     test_results = {}
     print("Starting final meta-testing on all PB tasks...")
     for task_name, loader in test_loaders.items():
+        print(f"--- Testing on task: {task_name} ---")
         test_loss, test_acc = validate_or_test(test_maml, loader, device, args.adaptation_steps_test, 'Testing', test_task_name=task_name)
-        test_results[task_name] = {'loss': test_loss.item(), 'accuracy': test_acc.item()}
-        print(f"  Test Task: {task_name} | Loss: {test_loss:.4f}, Acc: {test_acc:.4f}")
+        test_results[task_name] = {'loss': test_loss, 'accuracy': test_acc}
+        print(f"  Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
 
     test_results_path = output_dir / 'meta_test_results.json'
     with open(test_results_path, 'w') as f:
