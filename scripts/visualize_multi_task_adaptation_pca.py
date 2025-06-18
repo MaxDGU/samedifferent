@@ -16,7 +16,9 @@ sys.path.append(str(PROJECT_ROOT))
 
 # --- Model Imports ---
 # Now we can import the models from the project
-from meta_baseline.models import Conv2LR, Conv4LR, Conv6LR
+from meta_baseline.models.conv2lr import SameDifferentCNN as Conv2LR
+from meta_baseline.models.conv4lr import SameDifferentCNN as Conv4LR
+from meta_baseline.models.conv6lr import SameDifferentCNN as Conv6LR
 
 # --- Constants ---
 ARCHS = ['conv2lr', 'conv4lr', 'conv6lr']
