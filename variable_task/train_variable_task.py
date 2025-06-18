@@ -391,7 +391,7 @@ def main(args):
 
     # --- Setup Optimizer, Scaler (for AMP) ---
     optimizer = torch.optim.AdamW(maml.parameters(), lr=args.outer_lr, weight_decay=args.weight_decay)
-    scaler = torch.cuda.amp.GradScaler() if args.use_amp and device.type == 'cuda' else None
+    scaler = torch.amp.GradScaler('cuda', enabled=(args.use_amp and device.type == 'cuda'))
     if scaler: print("Using Automatic Mixed Precision (AMP).")
 
     # --- Setup Datasets ---
@@ -402,16 +402,14 @@ def main(args):
         data_path,
         tasks=args.tasks,
         split='train',
-        support_sizes=VARIABLE_SUPPORT_SIZES,
-        query_size=FIXED_QUERY_SIZE
+        support_sizes=VARIABLE_SUPPORT_SIZES
     )
     print(f"Loading meta-validation dataset with tasks: {args.tasks}")
     val_dataset = SameDifferentDataset(
         data_path,
         tasks=args.tasks,
         split='val',
-        support_sizes=[10],
-        query_size=FIXED_QUERY_SIZE
+        support_sizes=VARIABLE_SUPPORT_SIZES
     )
 
     ALL_PB_TASKS = [
@@ -423,8 +421,7 @@ def main(args):
                         data_path,
                         tasks=[task],
                         split='test',
-                        support_sizes=[10],
-                        query_size=FIXED_QUERY_SIZE,
+                        support_sizes=VARIABLE_SUPPORT_SIZES
                      ) for task in ALL_PB_TASKS}
 
 
