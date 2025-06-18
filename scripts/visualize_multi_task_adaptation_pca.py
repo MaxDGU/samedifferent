@@ -23,6 +23,19 @@ from meta_baseline.models.conv6lr import SameDifferentCNN as Conv6LR
 # --- Constants ---
 ARCHS = ['conv2lr', 'conv4lr', 'conv6lr']
 SEEDS = [123, 456, 789, 555, 999]
+PB_SEED_FOR_INIT = 0  # Use seed 0 as the canonical starting point from PB training
+
+OLD_MAML_RUN_DIRS = {
+    'conv2lr': "conv2lr_runs_20250127_131933",
+    'conv4lr': "exp1_(finished)conv4lr_runs_20250126_201548",
+    'conv6lr': "exp1_(untested)conv6lr_runs_20250127_110352"
+}
+
+OLD_MAML_FILENAME_PATTERNS = {
+    'conv2lr': "seed_{seed}/model_seed_{seed}_pretesting.pt",
+    'conv4lr': "seed_{seed}/model_seed_{seed}.pt",
+    'conv6lr': "seed_{seed}/model_seed_{seed}.pt"
+}
 
 def get_model_from_arch(arch):
     """Returns the model class constructor for a given architecture string."""
@@ -40,16 +53,51 @@ def flatten_weights(model):
     return np.concatenate([p.data.cpu().numpy().flatten() for p in model.parameters()])
 
 def load_initial_pb_weights(arch):
-    """Load initial weights from a pre-trained PB model."""
+    """Load initial weights from a pre-trained PB model from the old runs."""
     model = get_model_from_arch(arch)
-    # This path is based on where the PB-trained models were saved in previous steps.
-    path = PROJECT_ROOT / f"maml_pbweights_conv6/{arch}_pb_model.pth"
-    if not path.exists():
-        print(f"Warning: Initial PB model not found at {path}")
+
+    run_dir = OLD_MAML_RUN_DIRS.get(arch)
+    if not run_dir:
+        print(f"Warning: No old MAML run directory specified for arch {arch}")
         return None
+
+    fname_pattern = OLD_MAML_FILENAME_PATTERNS.get(arch)
+    if not fname_pattern:
+        print(f"Warning: No filename pattern specified for arch {arch}")
+        return None
+
+    model_filename = fname_pattern.format(seed=PB_SEED_FOR_INIT)
+    path = PROJECT_ROOT / run_dir / model_filename
+
+    if not path.exists():
+        # Fallback to checking inside a 'results' directory
+        path_fallback = PROJECT_ROOT / "results" / run_dir / model_filename
+        if not path_fallback.exists():
+            print(f"Warning: Initial PB model not found. Checked:\n  1. {path}\n  2. {path_fallback}")
+            return None
+        path = path_fallback
+
     try:
-        # The PB models were saved as entire model files, not state_dicts
-        model = torch.load(path, map_location=torch.device('cpu'))
+        # The old models are likely saved as state_dicts in .pt files
+        checkpoint = torch.load(path, map_location=torch.device('cpu'))
+        
+        # Accommodate different checkpoint saving conventions
+        state_dict = None
+        if 'model_state_dict' in checkpoint:
+            state_dict = checkpoint['model_state_dict']
+        elif 'model' in checkpoint and hasattr(checkpoint['model'], 'state_dict'):
+             state_dict = checkpoint['model'].state_dict()
+        elif 'model' in checkpoint and isinstance(checkpoint['model'], dict):
+             state_dict = checkpoint['model']
+        elif isinstance(checkpoint, dict):
+            # If the checkpoint is a state_dict itself
+            state_dict = checkpoint
+        else:
+             # If the loaded object is the model itself
+             model = checkpoint
+             return flatten_weights(model)
+
+        model.load_state_dict(state_dict)
         return flatten_weights(model)
     except Exception as e:
         print(f"Warning: Could not load initial PB model from {path}. Error: {e}")

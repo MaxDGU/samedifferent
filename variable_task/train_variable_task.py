@@ -456,8 +456,11 @@ def main(args):
         train_loss, train_acc = train_epoch(maml, train_loader, optimizer, device, args.adaptation_steps_train, scaler, epoch, args)
         
         val_loss, val_acc = -1.0, -1.0
-        if (epoch + 1) % args.val_freq == 0:
-            val_loss, val_acc = validate_or_test(maml, val_loader, device, args.adaptation_steps_test, 'Validating', epoch)
+        run_validation = (epoch + 1) % args.val_freq == 0
+        if run_validation:
+            val_loss_tensor, val_acc_tensor = validate_or_test(maml, val_loader, device, args.adaptation_steps_test, 'Validating', epoch)
+            val_loss = val_loss_tensor.item()
+            val_acc = val_acc_tensor.item()
             print(f"Epoch {epoch+1}/{args.epochs} | Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
             
             if val_acc > best_val_acc:
@@ -471,10 +474,10 @@ def main(args):
 
         metrics = {
             'epoch': epoch + 1,
-            'train_loss': train_loss,
-            'train_accuracy': train_acc,
-            'validation_loss': val_loss if (epoch + 1) % args.val_freq == 0 else 'N/A',
-            'validation_accuracy': val_acc if (epoch + 1) % args.val_freq == 0 else 'N/A',
+            'train_loss': train_loss.item(),
+            'train_accuracy': train_acc.item(),
+            'validation_loss': val_loss if run_validation else 'N/A',
+            'validation_accuracy': val_acc if run_validation else 'N/A',
             'best_validation_accuracy': best_val_acc,
             'patience_counter': patience_counter
         }
@@ -519,7 +522,7 @@ def main(args):
     print("Starting final meta-testing on all PB tasks...")
     for task_name, loader in test_loaders.items():
         test_loss, test_acc = validate_or_test(test_maml, loader, device, args.adaptation_steps_test, 'Testing', test_task_name=task_name)
-        test_results[task_name] = {'loss': test_loss, 'accuracy': test_acc}
+        test_results[task_name] = {'loss': test_loss.item(), 'accuracy': test_acc.item()}
         print(f"  Test Task: {task_name} | Loss: {test_loss:.4f}, Acc: {test_acc:.4f}")
 
     test_results_path = output_dir / 'meta_test_results.json'
