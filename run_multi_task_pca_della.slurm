@@ -24,11 +24,6 @@ echo "PYTHONPATH: ${PYTHONPATH}"
 
 # --- Execution ---
 echo "Running the Multi-Task Adaptation PCA script..."
-python scripts/visualize_multi_task_adaptation_pca.py \
-    --vanilla_seed 0 \
-    --meta_seed 3 \
-    --support_size 6 \
-    --lr 0.001 \
-    --steps 5
+python scripts/visualize_multi_task_adaptation_pca.py
 
 echo "Job finished with exit code $? at $(date)" 
