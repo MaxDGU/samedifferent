@@ -284,7 +284,7 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
         
         print_debug_stats("PostOptimizerStep", current_arch, epoch_num, meta_batch_idx, maml_model=maml)
 
-        total_meta_loss += avg_query_loss_for_meta_batch.item()
+        total_meta_loss += avg_query_loss_for_meta_batch
         total_meta_acc += avg_query_acc_for_meta_batch
         num_meta_batches_processed += 1
 
@@ -474,8 +474,8 @@ def main(args):
 
         metrics = {
             'epoch': epoch + 1,
-            'train_loss': train_loss.item(),
-            'train_accuracy': train_acc.item(),
+            'train_loss': train_loss,
+            'train_accuracy': train_acc,
             'validation_loss': val_loss if run_validation else 'N/A',
             'validation_accuracy': val_acc if run_validation else 'N/A',
             'best_validation_accuracy': best_val_acc,
