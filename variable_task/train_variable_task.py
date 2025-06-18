@@ -491,11 +491,8 @@ def main(args):
 
     print("Meta-training finished.")
 
-    metrics_path = output_dir / 'training_metrics.json'
-    with open(metrics_path, 'w') as f:
-        json.dump(training_metrics, f, indent=4)
-    print(f"Training metrics saved to {metrics_path}")
-
+    # --- Save Model Checkpoint ---
+    # Save the model *before* metrics, so a crash during metric saving doesn't lose the model.
     if best_model_state:
         model_path = output_dir / 'best_model.pth'
         torch.save(best_model_state, model_path)
@@ -507,16 +504,30 @@ def main(args):
         torch.save(final_model_state, model_path)
         print(f"Final model at last epoch saved to {model_path}")
 
+    # --- Save Training Metrics ---
+    metrics_path = output_dir / 'training_metrics.json'
+    with open(metrics_path, 'w') as f:
+        json.dump(training_metrics, f, indent=4)
+    print(f"Training metrics saved to {metrics_path}")
+
+
+    # --- Meta-Testing ---
     if best_model_state:
         print("Loading best model for meta-testing...")
-        test_model_base = ModelClass(img_size=128, in_channels=3).to(device)
+        # Re-initialize the model structure and load the best state_dict
+        test_model_base = ModelClass()
         test_model_base.load_state_dict(best_model_state)
-        test_maml = l2l.algorithms.MAML(test_model_base, lr=args.inner_lr, first_order=args.first_order)
-        if device.type == 'cuda' and torch.cuda.device_count() > 1 and args.dataparallel:
-            test_maml = torch.nn.DataParallel(test_maml)
+        test_model_base.to(device)
+        test_maml = l2l.algorithms.MAML(test_model_base, lr=args.inner_lr, first_order=args.first_order, allow_nograd=True)
     else:
         print("No best model found. Using final model for meta-testing.")
+        # The 'maml' object is already the final model
         test_maml = maml
+    
+    # Handle DataParallel for the test model
+    if device.type == 'cuda' and torch.cuda.device_count() > 1 and args.dataparallel and not isinstance(test_maml, torch.nn.DataParallel):
+         test_maml = torch.nn.DataParallel(test_maml)
+
 
     test_results = {}
     print("Starting final meta-testing on all PB tasks...")
