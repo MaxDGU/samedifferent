@@ -568,7 +568,7 @@ if __name__ == '__main__':
 
     # Training Procedure
     parser.add_argument('--epochs', type=int, default=100, help="Maximum number of training epochs.")
-    parser.add_argument('--num_meta_batches_per_epoch', type=int, default=100, help="Number of meta-batches per training epoch.")
+    parser.add_argument('--num_meta_batches_per_epoch', type=int, default=200, help="Number of meta-batches per training epoch.")
     parser.add_argument('--patience', type=int, default=20, help="Patience for early stopping based on validation accuracy.")
     parser.add_argument('--val_freq', type=int, default=5, help="Frequency (in epochs) to run validation.")
     parser.add_argument('--weight_decay', type=float, default=0.01, help="Weight decay for the AdamW optimizer.")
