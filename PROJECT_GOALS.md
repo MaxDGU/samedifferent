@@ -80,7 +80,7 @@ Investigate the effectiveness of meta-learning compared to standard supervised l
 *   **Goal:** Analyze and visualize the learned weight spaces of meta-learned vs. vanilla-learned models using techniques like PCA.
 *   **Models:** Weights from relevant experiments (Baselines, Meta Baseline, etc.).
 *   **Method:** PCA, other visualization techniques.
-*   **Status:** In Progress (Focus on improving visualizations).
+*   **Status:** In Progress (Focus on improving visualizations). 
 
 ## New Goals and Tasks
 
