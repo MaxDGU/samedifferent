@@ -1,129 +1,100 @@
 import os
-import json
-import glob
 import re
 import pandas as pd
-import seaborn as sns
+import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 import argparse
+from pathlib import Path
 
-def aggregate_results(results_dir, output_dir):
+def parse_slurm_output(file_path):
     """
-    Aggregates results from variable task experiments, calculates mean accuracies on held-out tasks,
-    and generates a summary plot.
-
-    Args:
-        results_dir (str): The base directory where experimental results are stored.
-        output_dir (str): The directory to save the aggregated summary and plot.
+    Parses a SLURM output file to extract experiment parameters and results.
     """
-    print(f"Aggregating results from: {results_dir}")
-    # Regex to parse architecture, seed, and task count from the directory name
-    pattern = re.compile(r"arch_(?P<arch>[\w\d]+)_seed_(?P<seed>\d+)_(\d+)tasks")
-    
-    all_results = []
-    
-    # Discover all PB tasks from a sample results file to identify held-out tasks
-    all_pb_tasks = set()
-    sample_files = glob.glob(os.path.join(results_dir, "**/results.json"), recursive=True)
-    if not sample_files:
-        print("No result files found. Exiting.")
-        return
-        
-    with open(sample_files[0], 'r') as f:
-        sample_data = json.load(f)
-        all_pb_tasks = set(sample_data['test_results'].keys())
-    print(f"Discovered all PB tasks for evaluation: {sorted(list(all_pb_tasks))}")
+    with open(file_path, 'r') as f:
+        content = f.read()
 
-    # Iterate over all result files
-    for filepath in sample_files:
-        match = pattern.search(filepath)
-        if not match:
-            print(f"Warning: Could not parse metadata from path: {filepath}")
-            continue
-            
-        data = match.groupdict()
-        num_tasks = int(os.path.basename(os.path.dirname(filepath)).split('_')[-1].replace('tasks', ''))
-        
-        with open(filepath, 'r') as f:
-            results_data = json.load(f)
-        
-        training_tasks = set(results_data['args']['tasks'])
-        held_out_tasks = all_pb_tasks - training_tasks
+    try:
+        num_tasks_match = re.search(r'Number of Tasks: (\d+)', content)
+        num_tasks = int(num_tasks_match.group(1)) if num_tasks_match else None
 
-        # Calculate average accuracy on held-out tasks
-        held_out_accuracies = []
-        for task in held_out_tasks:
-            if task in results_data['test_results']:
-                held_out_accuracies.append(results_data['test_results'][task]['post_adaptation_accuracy'])
-        
-        if held_out_accuracies:
-            avg_held_out_accuracy = sum(held_out_accuracies) / len(held_out_accuracies)
-        else:
-            avg_held_out_accuracy = None # Handle case with 10 tasks where there are no held-out tasks
+        seed_match = re.search(r'Seed: (\d+)', content)
+        seed = int(seed_match.group(1)) if seed_match else None
 
-        all_results.append({
-            'arch': data['arch'],
-            'seed': int(data['seed']),
-            'num_tasks': num_tasks,
-            'avg_held_out_accuracy': avg_held_out_accuracy
-        })
+        accuracies = re.findall(r'New best validation accuracy: (\d+\.\d+)', content)
+        best_acc = float(accuracies[-1]) if accuracies else None
 
-    if not all_results:
-        print("No valid results were aggregated.")
+        if num_tasks is None or seed is None or best_acc is None:
+            print(f"Warning: Could not parse all required information from {file_path}. Skipping.")
+            # Try to find at least the validation accuracy from the end if other info is missing
+            final_acc_match = re.findall(r'Val Acc: (\d\.\d+)', content)
+            if best_acc is None and final_acc_match:
+                 best_acc = float(final_acc_match[-1])
+
+            if num_tasks is None or seed is None or best_acc is None:
+                return None
+
+
+        return {'num_tasks': num_tasks, 'seed': seed, 'accuracy': best_acc}
+    except Exception as e:
+        print(f"Error parsing file {file_path}: {e}")
+        return None
+
+def main(results_dir, output_dir):
+    """
+    Main function to aggregate results and plot them.
+    """
+    results_dir = Path(results_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    results = []
+    for f in results_dir.glob('slurm_*.out'):
+        data = parse_slurm_output(f)
+        if data:
+            results.append(data)
+
+    if not results:
+        print("No results found. Exiting.")
         return
 
-    # Create a pandas DataFrame for easy analysis
-    df = pd.DataFrame(all_results)
+    df = pd.DataFrame(results)
     
-    # Save the raw aggregated data
-    raw_csv_path = os.path.join(output_dir, 'variable_task_raw_results.csv')
-    df.to_csv(raw_csv_path, index=False)
-    print(f"Saved raw aggregated data to {raw_csv_path}")
+    # Save raw extracted data
+    df.to_csv(output_dir / 'variable_task_raw_results.csv', index=False)
+    print(f"Saved raw results to {output_dir / 'variable_task_raw_results.csv'}")
 
-    # Calculate mean and std dev across seeds
-    summary_df = df.groupby('num_tasks')['avg_held_out_accuracy'].agg(['mean', 'std']).reset_index()
-    
-    # Save the summary data
-    summary_json_path = os.path.join(output_dir, 'variable_task_summary.json')
-    summary_df.to_json(summary_json_path, orient='records', indent=4)
-    print(f"Saved summary data to {summary_json_path}")
-    
-    summary_csv_path = os.path.join(output_dir, 'variable_task_summary.csv')
-    summary_df.to_csv(summary_csv_path, index=False)
-    print(f"Saved summary data to {summary_csv_path}")
+    # Aggregate results
+    agg_df = df.groupby('num_tasks')['accuracy'].agg(['mean', 'std', lambda x: x.sem()]).rename(columns={'<lambda_0>': 'sem'}).reset_index()
+    agg_df.to_csv(output_dir / 'variable_task_aggregated_results.csv', index=False)
+    print(f"Saved aggregated results to {output_dir / 'variable_task_aggregated_results.csv'}")
 
-    # Plotting the results
+
+    # Plotting
     plt.style.use('seaborn-v0_8-whitegrid')
-    fig, ax = plt.subplots(figsize=(12, 8))
-    
-    sns.lineplot(data=summary_df, x='num_tasks', y='mean', marker='o', ax=ax, label='Mean Accuracy')
-    ax.fill_between(summary_df['num_tasks'], 
-                    summary_df['mean'] - summary_df['std'], 
-                    summary_df['mean'] + summary_df['std'], 
-                    alpha=0.2, label='Standard Deviation')
+    fig, ax = plt.subplots(figsize=(10, 6))
 
-    ax.set_title('Impact of Number of Meta-Training Tasks on Held-Out Task Performance', fontsize=16, pad=20)
-    ax.set_xlabel('Number of Training Tasks', fontsize=12)
-    ax.set_ylabel('Mean Post-Adaptation Accuracy on Held-Out Tasks', fontsize=12)
-    ax.set_xticks(range(1, 11))
+    ax.errorbar(agg_df['num_tasks'], agg_df['mean'], yerr=agg_df['sem'], fmt='-o', capsize=5, label='Mean Accuracy with SEM')
+    
+    ax.set_xlabel('Number of Meta-Training Tasks', fontsize=12)
+    ax.set_ylabel('Final Validation Accuracy', fontsize=12)
+    ax.set_title('Model Performance vs. Number of Meta-Training Tasks (conv6)', fontsize=14)
+    ax.set_xticks(range(1, agg_df['num_tasks'].max() + 1))
     ax.legend()
     ax.grid(True, which='both', linestyle='--', linewidth=0.5)
-    
-    plot_path = os.path.join(output_dir, 'variable_task_performance.png')
+
+    plot_path = output_dir / 'variable_task_accuracy_vs_num_tasks.png'
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-    print(f"Saved plot to {plot_path}")
-    plt.show()
+    print(f"Plot saved to {plot_path}")
+    # plt.show()
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Aggregate results from the variable task experiment.")
-    parser.add_argument('--results_dir', type=str, required=True, 
-                        help='Directory containing the experimental results.')
-    parser.add_argument('--output_dir', type=str, required=True,
-                        help='Directory to save aggregated results and plots.')
+    parser = argparse.ArgumentParser(description='Aggregate and plot results from variable task experiments.')
+    parser.add_argument('--results_dir', type=str, 
+                        default='/scratch/gpfs/mg7411/samedifferent/results/variable_task_experiments/slurm_logs/var_tasks_conv6',
+                        help='Directory containing the slurm output files.')
+    parser.add_argument('--output_dir', type=str, default='variable_task/results',
+                        help='Directory to save plots and aggregated data.')
     
     args = parser.parse_args()
-    
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
-        
-    aggregate_results(args.results_dir, args.output_dir) 
+    main(args.results_dir, args.output_dir) 
