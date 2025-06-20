@@ -227,7 +227,7 @@ class EarlyStopping:
             self.counter = 0
 
 def validate(maml, val_loader, device, adaptation_steps=5, inner_lr=None):
-    """Validation with learned per-layer learning rates"""
+    """Validation loop for MAML."""
     maml.module.eval()
     total_batches = len(val_loader)
     processed_batches = 0
@@ -262,7 +262,6 @@ def validate(maml, val_loader, device, adaptation_steps=5, inner_lr=None):
             
             # Clone model for adaptation
             learner = maml.clone()
-            layer_lrs = learner.module.get_layer_lrs()
             
             # Adapt on support set
             for _ in range(adaptation_steps):
@@ -281,11 +280,10 @@ def validate(maml, val_loader, device, adaptation_steps=5, inner_lr=None):
                         retain_graph=True
                     )
                     
-                    # Update parameters that have gradients
-                    for (name, param), grad in zip(learner.named_parameters(), grads):
+                    # Standard MAML update using the learner's inner LR
+                    for param, grad in zip(learner.parameters(), grads):
                         if grad is not None:
-                            lr = layer_lrs.get(name, torch.tensor(0.01).to(device))
-                            param.data = param.data - lr.abs() * grad
+                            param.data.sub_(learner.lr * grad)
                 except RuntimeError as e:
                     if "graph" in str(e):
                         print(f"Warning: Graph error in validation. Skipping step.")
@@ -321,7 +319,7 @@ def validate(maml, val_loader, device, adaptation_steps=5, inner_lr=None):
             
             # Clear some memory
             del support_images, support_labels, query_images, query_labels
-            del learner, layer_lrs, support_preds, query_preds
+            del learner
             torch.cuda.empty_cache()
             
         except RuntimeError as e:
@@ -442,12 +440,6 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler)
     batch_loss = 0
     batch_acc = 0
     
-    # Debug: Print initial learning rate gradients
-    print("\nChecking learning rate parameters:")
-    for name, param in maml.module.named_parameters():
-        if 'lr_' in name:
-            print(f"{name}: requires_grad={param.requires_grad}, grad={param.grad}")
-    
     pbar = tqdm(train_loader, desc='Training')
     for batch_idx, batch in enumerate(pbar):
         optimizer.zero_grad()
@@ -471,13 +463,6 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler)
             # Adapt the model on the support set
             learner = maml.clone()
             
-            # Debug: Print learning rates being used
-            if batch_idx == 0:
-                print("\nLearning rates for first batch:")
-                layer_lrs = learner.module.get_layer_lrs()
-                for name, lr in layer_lrs.items():
-                    print(f"{name}: lr={lr.item()}")
-            
             for _ in range(adaptation_steps):
                 with torch.amp.autocast('cuda'):  # Updated to new syntax
                     support_preds = learner(support_images)
@@ -495,12 +480,10 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler)
                         retain_graph=True
                     )
                     
-                    # Update parameters that have gradients
-                    layer_lrs = learner.module.get_layer_lrs()
-                    for (name, param), grad in zip(learner.named_parameters(), grads):
-                        if grad is not None:  # Only update if gradient exists
-                            lr = layer_lrs.get(name, torch.tensor(0.01).to(device))
-                            param.data = param.data - lr.abs() * grad
+                    # Standard MAML update using the learner's inner LR
+                    for param, grad in zip(learner.parameters(), grads):
+                        if grad is not None:
+                            param.data.sub_(learner.lr * grad)
                 except RuntimeError as e:
                     if "graph" in str(e):
                         print(f"Warning: Graph error in adaptation. Skipping step.")
@@ -519,13 +502,6 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler)
             # Scale loss and compute gradients
             scaled_loss = scaler.scale(query_loss)
             scaled_loss.backward(retain_graph=True)
-            
-            # Debug: Print learning rate gradients after backward
-            if batch_idx == 0:
-                print("\nLearning rate gradients after backward:")
-                for name, param in maml.module.named_parameters():
-                    if 'lr_' in name:
-                        print(f"{name}: grad={param.grad}")
             
             # Unscale gradients and check for infs/nans
             scaler.unscale_(optimizer)
