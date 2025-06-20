@@ -20,6 +20,7 @@ sys.path.append(str(project_root))
 try:
     from baselines.models.conv6 import SameDifferentCNN as VanillaModel
     from scripts.temp_model import PB_Conv6 as MetaModel
+    from meta_baseline.models.conv6lr import SameDifferentCNN as NaturalisticMetaModel
     print("Successfully imported model architectures.")
 except ImportError as e:
     print(f"Fatal Error importing models: {e}. A dummy class will be used.")
@@ -109,14 +110,14 @@ def main(args):
             if not model_path.exists():
                 print(f"  Warning: Could not find model file for naturalistic seed {seed} at {model_path}. Skipping.")
                 continue
-
+            
             print(f"Loading naturalistic model from seed {seed} at {model_path}")
             
-            naturalistic_model = MetaModel() # Use MetaModel architecture for naturalistic MAML models
+            # Use the specific architecture for naturalistic models
+            naturalistic_model = NaturalisticMetaModel()
             checkpoint = torch.load(model_path, map_location='cpu')
             
             # The checkpoint is a dictionary; we need the 'model_state_dict'.
-            # Using strict=False for flexibility, similar to the other meta model.
             naturalistic_model.load_state_dict(checkpoint['model_state_dict'], strict=False)
             
             naturalistic_weights = flatten_weights(naturalistic_model)
