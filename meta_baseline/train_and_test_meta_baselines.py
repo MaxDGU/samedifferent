@@ -56,8 +56,8 @@ def main():
                         help='Batch size for training and testing')
     parser.add_argument('--epochs', type=int, default=100,
                         help='Number of training epochs')
-    parser.add_argument('--support_size', type=int, default=10,
-                        help='Number of support examples per class')
+    parser.add_argument('--support_size', type=int, nargs='+', default=[10],
+                        help='A list of support sizes to use for training (e.g., 4 6 8 10)')
     parser.add_argument('--adaptation_steps', type=int, default=5,
                         help='Number of adaptation steps during training')
     parser.add_argument('--test_adaptation_steps', type=int, default=15,
@@ -95,8 +95,8 @@ def main():
         os.makedirs(arch_dir, exist_ok=True)
         
         print("\nCreating datasets...")
-        train_dataset = SameDifferentDataset(args.data_dir, PB_TASKS, 'train', support_sizes=[args.support_size])
-        val_dataset = SameDifferentDataset(args.data_dir, PB_TASKS, 'val', support_sizes=[args.support_size])
+        train_dataset = SameDifferentDataset(args.data_dir, PB_TASKS, 'train', support_sizes=args.support_size)
+        val_dataset = SameDifferentDataset(args.data_dir, PB_TASKS, 'val', support_sizes=args.support_size)
         
         train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, 
                                 num_workers=1, pin_memory=True,
