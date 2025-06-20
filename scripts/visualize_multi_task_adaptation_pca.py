@@ -106,16 +106,22 @@ def main(args):
         try:
             # The path structure is a bit nested and inconsistent
             model_path = naturalistic_base_path / f"conv6lr/seed_{seed}/conv6lr/seed_{seed}/conv6lr_best.pth"
+            if not model_path.exists():
+                print(f"  Warning: Could not find model file for naturalistic seed {seed} at {model_path}. Skipping.")
+                continue
+
             print(f"Loading naturalistic model from seed {seed} at {model_path}")
             
-            naturalistic_model = VanillaModel() # Assumes same architecture as vanilla
-            naturalistic_model.load_state_dict(torch.load(model_path, map_location='cpu'))
+            naturalistic_model = MetaModel() # Use MetaModel architecture for naturalistic MAML models
+            checkpoint = torch.load(model_path, map_location='cpu')
+            
+            # The checkpoint is a dictionary; we need the 'model_state_dict'.
+            # Using strict=False for flexibility, similar to the other meta model.
+            naturalistic_model.load_state_dict(checkpoint['model_state_dict'], strict=False)
             
             naturalistic_weights = flatten_weights(naturalistic_model)
             delta = naturalistic_weights - vanilla_pre_weights
             naturalistic_deltas.append(delta)
-        except FileNotFoundError:
-            print(f"  Warning: Could not find model file for naturalistic seed {seed}. Skipping.")
         except Exception as e:
             print(f"  Warning: Error loading model for naturalistic seed {seed}: {e}. Skipping.")
 
