@@ -61,6 +61,10 @@ class SimpleHDF5Dataset(Dataset):
 def flatten_weights(model):
     return np.concatenate([p.cpu().detach().numpy().flatten() for p in model.parameters()])
 
+def flatten_weights_from_state_dict(state_dict):
+    """Flattens weights directly from a state_dict, bypassing model instantiation."""
+    return np.concatenate([p.cpu().numpy().flatten() for p in state_dict.values()])
+
 def adapt_model(model, loader, device, lr, steps):
     learner = copy.deepcopy(model)
     learner.to(device)
@@ -100,31 +104,26 @@ def main(args):
     meta_pre_weights = flatten_weights(meta_model)
 
     # --- Load Naturalistic Meta-Trained Models ---
-    naturalistic_deltas = []
+    naturalistic_final_weights_list = []
     naturalistic_base_path = Path(args.naturalistic_models_dir)
-    print("\n--- Loading Naturalistic Meta-Trained Models ---")
+    print("\n--- Loading Naturalistic Meta-Trained Models (as raw weights) ---")
     for seed in args.naturalistic_seeds:
         try:
-            # The path structure is a bit nested and inconsistent
             model_path = naturalistic_base_path / f"conv6lr/seed_{seed}/conv6lr/seed_{seed}/conv6lr_best.pth"
             if not model_path.exists():
                 print(f"  Warning: Could not find model file for naturalistic seed {seed} at {model_path}. Skipping.")
                 continue
-            
-            print(f"Loading naturalistic model from seed {seed} at {model_path}")
-            
-            # Use the specific architecture for naturalistic models
-            naturalistic_model = NaturalisticMetaModel()
+
+            print(f"Loading final weights for naturalistic seed {seed}")
             checkpoint = torch.load(model_path, map_location='cpu')
+            state_dict = checkpoint['model_state_dict']
             
-            # The checkpoint is a dictionary; we need the 'model_state_dict'.
-            naturalistic_model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-            
-            naturalistic_weights = flatten_weights(naturalistic_model)
-            delta = naturalistic_weights - vanilla_pre_weights
-            naturalistic_deltas.append(delta)
+            # Flatten weights directly from the state_dict to avoid architecture errors
+            final_weights = flatten_weights_from_state_dict(state_dict)
+            naturalistic_final_weights_list.append(final_weights)
+
         except Exception as e:
-            print(f"  Warning: Error loading model for naturalistic seed {seed}: {e}. Skipping.")
+            print(f"  Warning: Error processing weights for naturalistic seed {seed}: {e}. Skipping.")
 
     # --- Task and Data Collection Setup ---
     tasks = ['arrows', 'filled', 'irregular', 'lines', 'open', 'regular']
@@ -150,13 +149,15 @@ def main(args):
         meta_post_weights_list.append(flatten_weights(adapted_meta))
 
     # --- PCA on Adaptation Vectors ---
-    print("\n--- Performing PCA on Adaptation Vectors ---")
+    print("\n--- Performing PCA on Adaptation Vectors and Final Weights ---")
     vanilla_deltas = [post - vanilla_pre_weights for post in vanilla_post_weights_list]
     meta_deltas = [post - meta_pre_weights for post in meta_post_weights_list]
-    all_deltas = vanilla_deltas + meta_deltas + naturalistic_deltas
+    
+    # Combine true deltas with the final (absolute) naturalistic weights for PCA
+    all_vectors_for_pca = vanilla_deltas + meta_deltas + naturalistic_final_weights_list
 
-    max_len = max(len(d) for d in all_deltas)
-    padded_deltas = np.vstack([np.pad(d, (0, max_len - len(d)), 'constant') for d in all_deltas])
+    max_len = max(len(d) for d in all_vectors_for_pca)
+    padded_deltas = np.vstack([np.pad(d, (0, max_len - len(d)), 'constant') for d in all_vectors_for_pca])
     
     pca = PCA(n_components=2, random_state=42)
     pcs = pca.fit_transform(padded_deltas)
@@ -166,13 +167,13 @@ def main(args):
     fig, ax = plt.subplots(figsize=(14, 12))
     
     num_tasks_run = len(vanilla_deltas)
-    num_naturalistic_models = len(naturalistic_deltas)
+    num_meta_tasks_run = len(meta_deltas)
     
     vanilla_pcs = pcs[:num_tasks_run]
-    meta_pcs = pcs[num_tasks_run : num_tasks_run + num_tasks_run] # Assuming same number of tasks
-    naturalistic_pcs = pcs[num_tasks_run + num_tasks_run:]
+    meta_pcs = pcs[num_tasks_run : num_tasks_run + num_meta_tasks_run]
+    naturalistic_pcs = pcs[num_tasks_run + num_meta_tasks_run:]
     
-    # Plot spokes from origin
+    # Plot spokes from origin for true deltas
     origin = np.array([0, 0])
 
     # Plot Vanilla
@@ -185,16 +186,16 @@ def main(args):
         ax.arrow(origin[0], origin[1], meta_pcs[i, 0], meta_pcs[i, 1], 
                  color='darkorange', ls='-', lw=2, head_width=0.2, label='Meta Adaptation' if i == 0 else "")
 
-    # Plot Naturalistic
-    for i in range(naturalistic_pcs.shape[0]):
-        ax.arrow(origin[0], origin[1], naturalistic_pcs[i, 0], naturalistic_pcs[i, 1], 
-                 color='forestgreen', ls=':', lw=2, head_width=0.2, label='Naturalistic Meta-Training' if i == 0 else "")
+    # Plot Naturalistic final weights as a cluster of points
+    ax.scatter(naturalistic_pcs[:, 0], naturalistic_pcs[:, 1], 
+               c='forestgreen', s=120, marker='^', zorder=4, 
+               label='Naturalistic Final Weights')
 
     ax.scatter(origin[0], origin[1], c='black', s=150, zorder=5, marker='o', label='Shared Start Point')
     
-    ax.set_title('PCA of Adaptation Vectors from a Common Origin', fontsize=18)
-    ax.set_xlabel(f'Principal Component of Adaptation 1 ({pca.explained_variance_ratio_[0]:.2%})', fontsize=14)
-    ax.set_ylabel(f'Principal Component of Adaptation 2 ({pca.explained_variance_ratio_[1]:.2%})', fontsize=14)
+    ax.set_title('PCA of Adaptation Vectors and Final Naturalistic Weights', fontsize=18)
+    ax.set_xlabel(f'Principal Component 1 ({pca.explained_variance_ratio_[0]:.2%})', fontsize=14)
+    ax.set_ylabel(f'Principal Component 2 ({pca.explained_variance_ratio_[1]:.2%})', fontsize=14)
     ax.legend(fontsize=12)
     ax.grid(True)
     ax.axhline(0, color='grey', lw=0.5)
