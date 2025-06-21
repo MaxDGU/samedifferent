@@ -19,8 +19,7 @@ sys.path.append(str(project_root))
 # --- Model Imports ---
 try:
     from baselines.models.conv6 import SameDifferentCNN as VanillaModel
-    from scripts.temp_model import PB_Conv6 as MetaModel
-    from meta_baseline.models.conv6lr import SameDifferentCNN as NaturalisticMetaModel
+    from meta_baseline.models.conv6lr import SameDifferentCNN as MetaConv6Model
     print("Successfully imported model architectures.")
 except ImportError as e:
     print(f"Fatal Error importing models: {e}. A dummy class will be used.")
@@ -91,44 +90,45 @@ def main(args):
 
     # --- Load Base Models ---
     vanilla_path = Path(args.vanilla_models_dir) / f"regular/conv6/seed_{args.vanilla_seed}/initial_model.pth"
-    meta_path = Path(args.meta_models_dir) / f"model_seed_{args.meta_seed}_pretesting.pt"
-
     vanilla_model = VanillaModel()
     vanilla_model.load_state_dict(torch.load(vanilla_path, map_location='cpu'))
-    
-    meta_model = MetaModel()
-    checkpoint = torch.load(meta_path, map_location='cpu')
-    meta_model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-
     vanilla_pre_weights = flatten_weights(vanilla_model)
-    meta_pre_weights = flatten_weights(meta_model)
+
+    # --- Load Pre-Trained PB Meta-Model ---
+    pb_meta_path = Path(args.meta_models_dir) / f"seed_{args.meta_seed}/model_seed_{args.meta_seed}_checkpoint_epoch_80.pt"
+    pb_meta_model = MetaConv6Model()
+    pb_checkpoint = torch.load(pb_meta_path, map_location='cpu')
+    pb_meta_model.load_state_dict(pb_checkpoint['model_state_dict'], strict=False)
+    pb_meta_pre_weights = flatten_weights(pb_meta_model)
 
     # --- Load Naturalistic Meta-Trained Models ---
-    naturalistic_final_weights_list = []
+    naturalistic_deltas = []
     naturalistic_base_path = Path(args.naturalistic_models_dir)
-    print("\n--- Loading Naturalistic Meta-Trained Models (as raw weights) ---")
+    print("\n--- Loading Naturalistic Meta-Trained Models ---")
     for seed in args.naturalistic_seeds:
         try:
             model_path = naturalistic_base_path / f"conv6lr/seed_{seed}/conv6lr/seed_{seed}/conv6lr_best.pth"
             if not model_path.exists():
                 print(f"  Warning: Could not find model file for naturalistic seed {seed} at {model_path}. Skipping.")
                 continue
-
-            print(f"Loading final weights for naturalistic seed {seed}")
-            checkpoint = torch.load(model_path, map_location='cpu')
-            state_dict = checkpoint['model_state_dict']
             
-            # Flatten weights directly from the state_dict to avoid architecture errors
-            final_weights = flatten_weights_from_state_dict(state_dict)
-            naturalistic_final_weights_list.append(final_weights)
-
+            print(f"Loading naturalistic model from seed {seed}")
+            naturalistic_model = MetaConv6Model()
+            checkpoint = torch.load(model_path, map_location='cpu')
+            naturalistic_model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+            
+            # This delta represents the entire naturalistic meta-training process
+            # as a single vector from the common random start point.
+            naturalistic_weights = flatten_weights(naturalistic_model)
+            delta = naturalistic_weights - vanilla_pre_weights
+            naturalistic_deltas.append(delta)
         except Exception as e:
-            print(f"  Warning: Error processing weights for naturalistic seed {seed}: {e}. Skipping.")
+            print(f"  Warning: Error loading model for naturalistic seed {seed}: {e}. Skipping.")
 
     # --- Task and Data Collection Setup ---
     tasks = ['arrows', 'filled', 'irregular', 'lines', 'open', 'regular']
-    vanilla_post_weights_list = []
-    meta_post_weights_list = []
+    vanilla_adaptation_deltas = []
+    pb_meta_adaptation_deltas = []
 
     # --- Adaptation Loop ---
     for task in tqdm(tasks, desc="Adapting to tasks"):
@@ -138,26 +138,24 @@ def main(args):
             continue
         
         print(f"\n--- Adapting to {task} ---")
-        # Adapt Vanilla
-        loader_vanilla = DataLoader(SimpleHDF5Dataset(data_path, transform=T.Compose([T.ToPILImage(), T.Resize((128, 128)), T.ToTensor()])), batch_size=args.adaptation_batch_size, shuffle=True)
-        adapted_vanilla = adapt_model(vanilla_model, loader_vanilla, device, args.lr, args.steps)
-        vanilla_post_weights_list.append(flatten_weights(adapted_vanilla))
+        # Adapt Vanilla Model
+        loader = DataLoader(SimpleHDF5Dataset(data_path, transform=T.Compose([T.ToPILImage(), T.Resize((128, 128)), T.ToTensor()])), batch_size=args.adaptation_batch_size, shuffle=True)
+        adapted_vanilla = adapt_model(vanilla_model, loader, device, args.lr, args.steps)
+        vanilla_post_weights = flatten_weights(adapted_vanilla)
+        vanilla_adaptation_deltas.append(vanilla_post_weights - vanilla_pre_weights)
 
-        # Adapt Meta
-        loader_meta = DataLoader(SimpleHDF5Dataset(data_path, transform=T.Compose([T.ToPILImage(), T.Resize((35, 35)), T.ToTensor()])), batch_size=args.adaptation_batch_size, shuffle=True)
-        adapted_meta = adapt_model(meta_model, loader_meta, device, args.lr, args.steps)
-        meta_post_weights_list.append(flatten_weights(adapted_meta))
+        # Adapt PB-Meta-Trained Model
+        adapted_pb_meta = adapt_model(pb_meta_model, loader, device, args.lr, args.steps)
+        pb_meta_post_weights = flatten_weights(adapted_pb_meta)
+        pb_meta_adaptation_deltas.append(pb_meta_post_weights - pb_meta_pre_weights)
 
     # --- PCA on Adaptation Vectors ---
-    print("\n--- Performing PCA on Adaptation Vectors and Final Weights ---")
-    vanilla_deltas = [post - vanilla_pre_weights for post in vanilla_post_weights_list]
-    meta_deltas = [post - meta_pre_weights for post in meta_post_weights_list]
-    
-    # Combine true deltas with the final (absolute) naturalistic weights for PCA
-    all_vectors_for_pca = vanilla_deltas + meta_deltas + naturalistic_final_weights_list
+    print("\n--- Performing PCA on All Change Vectors ---")
+    # Combine all three types of "change" vectors to be visualized from a common origin
+    all_deltas = vanilla_adaptation_deltas + pb_meta_adaptation_deltas + naturalistic_deltas
 
-    max_len = max(len(d) for d in all_vectors_for_pca)
-    padded_deltas = np.vstack([np.pad(d, (0, max_len - len(d)), 'constant') for d in all_vectors_for_pca])
+    max_len = max(len(d) for d in all_deltas)
+    padded_deltas = np.vstack([np.pad(d, (0, max_len - len(d)), 'constant') for d in all_deltas])
     
     pca = PCA(n_components=2, random_state=42)
     pcs = pca.fit_transform(padded_deltas)
@@ -166,34 +164,34 @@ def main(args):
     print("\n--- Generating Plot ---")
     fig, ax = plt.subplots(figsize=(14, 12))
     
-    num_tasks_run = len(vanilla_deltas)
-    num_meta_tasks_run = len(meta_deltas)
+    num_vanilla_deltas = len(vanilla_adaptation_deltas)
+    num_pb_meta_deltas = len(pb_meta_adaptation_deltas)
     
-    vanilla_pcs = pcs[:num_tasks_run]
-    meta_pcs = pcs[num_tasks_run : num_tasks_run + num_meta_tasks_run]
-    naturalistic_pcs = pcs[num_tasks_run + num_meta_tasks_run:]
+    vanilla_pcs = pcs[:num_vanilla_deltas]
+    pb_meta_pcs = pcs[num_vanilla_deltas : num_vanilla_deltas + num_pb_meta_deltas]
+    naturalistic_pcs = pcs[num_vanilla_deltas + num_pb_meta_deltas:]
     
-    # Plot spokes from origin for true deltas
+    # Plot spokes from origin
     origin = np.array([0, 0])
 
-    # Plot Vanilla
+    # Plot Vanilla Adaptation
     for i in range(vanilla_pcs.shape[0]):
         ax.arrow(origin[0], origin[1], vanilla_pcs[i, 0], vanilla_pcs[i, 1], 
                  color='royalblue', ls='--', lw=1.5, head_width=0.2, label='Vanilla Adaptation' if i == 0 else "")
 
-    # Plot Meta
-    for i in range(meta_pcs.shape[0]):
-        ax.arrow(origin[0], origin[1], meta_pcs[i, 0], meta_pcs[i, 1], 
-                 color='darkorange', ls='-', lw=2, head_width=0.2, label='Meta Adaptation' if i == 0 else "")
+    # Plot PB-Meta Adaptation
+    for i in range(pb_meta_pcs.shape[0]):
+        ax.arrow(origin[0], origin[1], pb_meta_pcs[i, 0], pb_meta_pcs[i, 1], 
+                 color='darkorange', ls='-', lw=2, head_width=0.2, label='PB-Meta Adaptation' if i == 0 else "")
 
-    # Plot Naturalistic final weights as a cluster of points
-    ax.scatter(naturalistic_pcs[:, 0], naturalistic_pcs[:, 1], 
-               c='forestgreen', s=120, marker='^', zorder=4, 
-               label='Naturalistic Final Weights')
+    # Plot Naturalistic Meta-Training vectors
+    for i in range(naturalistic_pcs.shape[0]):
+        ax.arrow(origin[0], origin[1], naturalistic_pcs[i, 0], naturalistic_pcs[i, 1], 
+                 color='forestgreen', ls=':', lw=2.5, head_width=0.2, label='Naturalistic Meta-Training' if i == 0 else "")
 
     ax.scatter(origin[0], origin[1], c='black', s=150, zorder=5, marker='o', label='Shared Start Point')
     
-    ax.set_title('PCA of Adaptation Vectors and Final Naturalistic Weights', fontsize=18)
+    ax.set_title('PCA of Adaptation & Training Vectors from a Common Origin', fontsize=18)
     ax.set_xlabel(f'Principal Component 1 ({pca.explained_variance_ratio_[0]:.2%})', fontsize=14)
     ax.set_ylabel(f'Principal Component 2 ({pca.explained_variance_ratio_[1]:.2%})', fontsize=14)
     ax.legend(fontsize=12)
@@ -211,12 +209,12 @@ if __name__ == '__main__':
     
     # --- Paths and Seeds ---
     parser.add_argument('--vanilla_models_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/single_task/results/pb_single_task', help='Base directory for initial Vanilla-PB models.')
-    parser.add_argument('--meta_models_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6', help='Directory for trained Meta-PB models.')
+    parser.add_argument('--meta_models_dir', type=str, default='/scratch/gpfs/mg7411/exp1_(untested)conv6lr_runs_20250127_110352', help='Directory for trained 6-layer Meta-PB models.')
     parser.add_argument('--naturalistic_models_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/logs_naturalistic_meta', help='Base directory for meta-models trained on naturalistic data.')
     parser.add_argument('--data_base_dir', type=str, default='/scratch/gpfs/mg7411/data/pb/pb', help='Base directory containing PB task HDF5 files.')
     parser.add_argument('--output_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/visualizations/multi_task_pca', help='Directory to save the output plot.')
     parser.add_argument('--vanilla_seed', type=int, default=0, help='Seed for the single vanilla model to use.')
-    parser.add_argument('--meta_seed', type=int, default=3, help='Seed for the single meta model to use.')
+    parser.add_argument('--meta_seed', type=int, default=1, help='Seed for the single meta model to use (e.g., 0, 1, or 2).')
     parser.add_argument('--naturalistic_seeds', type=int, nargs='+', default=[42, 123, 555, 789, 999], help='List of seeds for the naturalistic meta-trained models.')
 
     # --- Hyperparameters ---
