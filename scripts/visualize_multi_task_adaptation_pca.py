@@ -39,12 +39,14 @@ def load_weights_from_path(model_path, model_class, device):
     checkpoint = torch.load(model_path, map_location=device)
     
     # Handle different checkpoint structures
+    state_dict = checkpoint
     if 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
+        state_dict = checkpoint['model_state_dict']
     elif 'model' in checkpoint:
-        model.load_state_dict(checkpoint['model'])
-    else:
-        model.load_state_dict(checkpoint)
+        state_dict = checkpoint['model']
+    
+    # Load the state dict with strict=False to ignore mismatches like missing BN stats
+    model.load_state_dict(state_dict, strict=False)
         
     return get_model_weights(model)
 
