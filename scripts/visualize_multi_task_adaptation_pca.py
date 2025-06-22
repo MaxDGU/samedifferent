@@ -67,7 +67,7 @@ def main():
     parser.add_argument('--seeds', type=int, nargs='+', default=[42, 123, 555, 789, 999], help='List of random seeds to process.')
     
     # Directories for different model types
-    parser.add_argument('--naturalistic_results_dir', type=str, default="results_naturalistic_meta_test", help="Directory for naturalistic MAML models.")
+    parser.add_argument('--naturalistic_results_dir', type=str, default="logs_naturalistic_meta", help="Directory for naturalistic MAML models.")
     parser.add_argument('--vanilla_results_dir', type=str, default="logs_naturalistic_vanilla", help="Directory for naturalistic Vanilla models.")
     parser.add_argument('--pb_results_dir', type=str, default="results/pb_retrained_conv6lr", help="Directory for PB-retrained MAML models.")
     
@@ -83,49 +83,40 @@ def main():
 
     # --- 1. Load MAML (Naturalistic) Weights ---
     print("--- Loading MAML (Naturalistic) Weights ---")
-    nat_maml_dir = Path(args.naturalistic_results_dir) / arch_name
+    nat_maml_dir = Path(args.naturalistic_results_dir)
     for seed in args.seeds:
         print(f"\n- Seed {seed}:")
-        seed_dir = nat_maml_dir / f"seed_{seed}"
-        
-        initial_path = find_weight_file(seed_dir, ["initial_model.pth", "model_initial.pth"])
-        final_path = find_weight_file(seed_dir, ["final_model.pth", "best_model.pt"])
-        
-        print(f"  Searching for initial model in: {seed_dir}")
-        if initial_path:
-            all_weights.append(load_weights_from_path(initial_path, model_class, device))
-            all_labels.append("MAML (Nat) Initial")
-            print(f"    -> Found and loaded: {initial_path.name}")
-        else:
-            print("    -> Not found.")
+        # Re-create initial state since we can't find a saved file reliably
+        set_seed(seed)
+        initial_model = model_class().to(device)
+        all_weights.append(get_model_weights(initial_model))
+        all_labels.append("MAML (Nat) Initial")
+        print("  Created initial MAML (Nat) weights on-the-fly.")
 
-        print(f"  Searching for final model in: {seed_dir}")
-        if final_path:
+        # Construct the specific, nested path for the final model
+        final_path = nat_maml_dir / arch_name / f"seed_{seed}" / arch_name / f"seed_{seed}" / f"{arch_name}_best.pth"
+        print(f"  Checking for final model: {final_path}")
+        if final_path.exists():
             all_weights.append(load_weights_from_path(final_path, model_class, device))
             all_labels.append("MAML (Nat) Final")
-            print(f"    -> Found and loaded: {final_path.name}")
+            print("    -> Found and loaded.")
         else:
             print("    -> Not found.")
 
     # --- 2. Load Vanilla (Naturalistic) Weights ---
     print("\n--- Loading Vanilla (Naturalistic) Weights ---")
-    # Vanilla initial weights are the same as MAML initial weights
+    vanilla_dir = Path(args.vanilla_results_dir)
     for seed in args.seeds:
         print(f"\n- Seed {seed}:")
-        maml_seed_dir = nat_maml_dir / f"seed_{seed}"
-        vanilla_seed_dir = Path(args.vanilla_results_dir) / arch_name / f"seed_{seed}"
+        # Re-create initial state to match MAML's start for a fair comparison
+        set_seed(seed)
+        initial_model = model_class().to(device)
+        all_weights.append(get_model_weights(initial_model))
+        all_labels.append("Vanilla (Nat) Initial")
+        print("  Created initial Vanilla (Nat) weights on-the-fly.")
 
-        initial_path = find_weight_file(maml_seed_dir, ["initial_model.pth", "model_initial.pth"])
-        final_path = find_weight_file(vanilla_seed_dir, ["final_model.pth", "best_model.pt"])
-
-        print(f"  Searching for initial model in: {maml_seed_dir} (re-used from MAML)")
-        if initial_path:
-            all_weights.append(load_weights_from_path(initial_path, model_class, device))
-            all_labels.append("Vanilla (Nat) Initial")
-            print(f"    -> Found and loaded: {initial_path.name}")
-        else:
-            print("    -> Not found.")
-
+        vanilla_seed_dir = vanilla_dir / arch_name / f"seed_{seed}"
+        final_path = find_weight_file(vanilla_seed_dir, ["best_model.pt", "final_model.pth"])
         print(f"  Searching for final model in: {vanilla_seed_dir}")
         if final_path:
             all_weights.append(load_weights_from_path(final_path, model_class, device))
@@ -139,7 +130,6 @@ def main():
     pb_dir = Path(args.pb_results_dir) / args.architecture
     for seed in args.seeds:
         print(f"\n- Seed {seed}:")
-        # Re-create initial state for PB models since it wasn't saved
         set_seed(seed)
         initial_model = model_class().to(device)
         all_weights.append(get_model_weights(initial_model))
