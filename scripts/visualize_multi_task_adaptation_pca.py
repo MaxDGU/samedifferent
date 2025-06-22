@@ -61,6 +61,22 @@ def import_model_class(architecture):
         print(f"Attempted to import from '{module_path}'. Please check the file and class names.")
         sys.exit(1)
 
+def import_legacy_model_class(architecture):
+    """Dynamically imports the LEGACY model class from the baselines.models module."""
+    try:
+        # Legacy models are not named with 'lr'
+        module_path = f"baselines.models.{architecture}"
+        module = importlib.import_module(module_path)
+        # The class name is different in legacy files
+        return module.SameDifferentCNN
+    except ImportError:
+        print(f"Error: Could not import legacy model for architecture '{architecture}'.")
+        print(f"Attempted to import from '{module_path}'.")
+        sys.exit(1)
+    except AttributeError:
+        print(f"Error: Class 'SameDifferentCNN' not found in '{module_path}'.")
+        sys.exit(1)
+
 def main():
     parser = argparse.ArgumentParser(description="Visualize model weight space using PCA.")
     parser.add_argument('--architecture', type=str, required=True, choices=['conv2', 'conv4', 'conv6'], help='Model architecture to visualize.')
@@ -75,7 +91,9 @@ def main():
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model_class = import_model_class(args.architecture)
+    # Import both new and old model classes
+    new_model_class = import_model_class(args.architecture)
+    legacy_model_class = import_legacy_model_class(args.architecture)
     arch_name = args.architecture + 'lr' if 'conv' in args.architecture else args.architecture
 
     all_weights = []
@@ -86,18 +104,19 @@ def main():
     nat_maml_dir = Path(args.naturalistic_results_dir)
     for seed in args.seeds:
         print(f"\n- Seed {seed}:")
-        # Re-create initial state since we can't find a saved file reliably
+        # Re-create initial state using the LEGACY model for apples-to-apples comparison
         set_seed(seed)
-        initial_model = model_class().to(device)
+        initial_model = legacy_model_class().to(device)
         all_weights.append(get_model_weights(initial_model))
         all_labels.append("MAML (Nat) Initial")
-        print("  Created initial MAML (Nat) weights on-the-fly.")
+        print("  Created initial MAML (Nat) weights on-the-fly (using legacy model class).")
 
         # Construct the specific, nested path for the final model
         final_path = nat_maml_dir / arch_name / f"seed_{seed}" / arch_name / f"seed_{seed}" / f"{arch_name}_best.pth"
         print(f"  Checking for final model: {final_path}")
         if final_path.exists():
-            all_weights.append(load_weights_from_path(final_path, model_class, device))
+            # Load these weights using the LEGACY model class
+            all_weights.append(load_weights_from_path(final_path, legacy_model_class, device))
             all_labels.append("MAML (Nat) Final")
             print("    -> Found and loaded.")
         else:
@@ -108,18 +127,19 @@ def main():
     vanilla_dir = Path(args.vanilla_results_dir)
     for seed in args.seeds:
         print(f"\n- Seed {seed}:")
-        # Re-create initial state to match MAML's start for a fair comparison
+        # Re-create initial state to match MAML's start, using the LEGACY model class
         set_seed(seed)
-        initial_model = model_class().to(device)
+        initial_model = legacy_model_class().to(device)
         all_weights.append(get_model_weights(initial_model))
         all_labels.append("Vanilla (Nat) Initial")
-        print("  Created initial Vanilla (Nat) weights on-the-fly.")
+        print("  Created initial Vanilla (Nat) weights on-the-fly (using legacy model class).")
 
         vanilla_seed_dir = vanilla_dir / arch_name / f"seed_{seed}"
         final_path = find_weight_file(vanilla_seed_dir, ["best_model.pt", "final_model.pth"])
         print(f"  Searching for final model in: {vanilla_seed_dir}")
         if final_path:
-            all_weights.append(load_weights_from_path(final_path, model_class, device))
+            # Vanilla models were also trained with the LEGACY architecture
+            all_weights.append(load_weights_from_path(final_path, legacy_model_class, device))
             all_labels.append("Vanilla (Nat) Final")
             print(f"    -> Found and loaded: {final_path.name}")
         else:
@@ -130,16 +150,18 @@ def main():
     pb_dir = Path(args.pb_results_dir) / args.architecture
     for seed in args.seeds:
         print(f"\n- Seed {seed}:")
+        # These were trained with the NEW architecture
         set_seed(seed)
-        initial_model = model_class().to(device)
+        initial_model = new_model_class().to(device)
         all_weights.append(get_model_weights(initial_model))
         all_labels.append("MAML (PB) Initial")
-        print("  Created initial PB model weights.")
+        print("  Created initial PB model weights (using new model class).")
 
         final_path = pb_dir / f"seed_{seed}" / "best_model.pt"
         print(f"  Checking for final model: {final_path}")
         if final_path.exists():
-            all_weights.append(load_weights_from_path(final_path, model_class, device))
+            # Load these weights using the NEW model class
+            all_weights.append(load_weights_from_path(final_path, new_model_class, device))
             all_labels.append("MAML (PB) Final")
             print("    -> Found and loaded.")
         else:
