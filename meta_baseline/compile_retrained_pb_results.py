@@ -8,28 +8,30 @@ import re
 def parse_log_file(file_path):
     """Parses a single log file to extract test accuracies for each task."""
     task_accuracies = {}
-    current_task = None
     # Regex to find the task name and the test accuracy
-    task_regex = re.compile(r"Testing on task: (\w+)")
-    acc_regex = re.compile(r"Test Loss: .*, Test Acc: ([\d\.]+)")
+    task_regex = re.compile(r"Testing on task: ([\w_]+)")
+    acc_regex = re.compile(r"Test Acc: ([\d\.]+)")
 
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-        for line in f:
-            task_match = task_regex.search(line)
-            if task_match:
-                current_task = task_match.group(1)
+        lines = f.readlines()
+
+    for i, line in enumerate(lines):
+        task_match = task_regex.search(line)
+        if task_match:
+            task_name = task_match.group(1)
+            
+            if task_name in task_accuracies:
                 continue
 
-            if current_task:
-                acc_match = acc_regex.search(line)
+            # Search in the subsequent lines for the accuracy for this task
+            # A window of 50 lines should be more than enough.
+            for j in range(i + 1, min(i + 50, len(lines))):
+                # We simplify the regex here to be more robust
+                acc_match = re.search(r"Test Acc: ([\d\.]+)", lines[j])
                 if acc_match:
                     accuracy = float(acc_match.group(1))
-                    # Only record the first accuracy found for a task to avoid duplicates
-                    if current_task not in task_accuracies:
-                        task_accuracies[current_task] = accuracy
-                    # Reset current_task so we are ready for the next one
-                    current_task = None
-
+                    task_accuracies[task_name] = accuracy
+                    break  # Found acc for this task, break inner loop
     return task_accuracies
 
 def main():
