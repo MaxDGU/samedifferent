@@ -1,227 +1,209 @@
 import torch
-import torch.nn as nn
 import numpy as np
-import h5py
-import argparse
+import os
+import sys
 from pathlib import Path
+import argparse
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
-import sys
-from torchvision import transforms as T
-from torch.utils.data import Dataset, DataLoader
-import copy
-from tqdm import tqdm
+from matplotlib.lines import Line2D
+import importlib
 
 # --- Setup Project Path ---
+# This ensures that we can import modules from the project root (e.g., meta_baseline)
 project_root = Path(__file__).resolve().parent.parent
 sys.path.append(str(project_root))
 
-# --- Model Imports ---
-try:
-    from baselines.models.conv6 import SameDifferentCNN as VanillaModel
-    from meta_baseline.models.conv6lr import SameDifferentCNN as MetaConv6Model
-    print("Successfully imported model architectures.")
-except ImportError as e:
-    print(f"Fatal Error importing models: {e}. A dummy class will be used.")
-    sys.exit(1)
+def set_seed(seed):
+    """Set random seed for reproducibility."""
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
-class SimpleHDF5Dataset(Dataset):
-    """
-    Loads data from a PB HDF5 file. Assumes top-level datasets
-    'support_images' and 'support_labels'.
-    """
-    def __init__(self, h5_path, transform=None):
-        self.h5_path = h5_path
-        self.transform = transform
-        self.file = None
+def get_model_weights(model):
+    """Flattens and returns the weights of a model as a numpy array."""
+    return np.concatenate([p.data.cpu().numpy().flatten() for p in model.parameters()])
+
+def load_weights_from_path(model_path, model_class, device):
+    """Loads a model's state_dict from a file and returns its flattened weights."""
+    model = model_class().to(device)
+    checkpoint = torch.load(model_path, map_location=device)
+    
+    # Handle different checkpoint structures
+    if 'model_state_dict' in checkpoint:
+        model.load_state_dict(checkpoint['model_state_dict'])
+    elif 'model' in checkpoint:
+        model.load_state_dict(checkpoint['model'])
+    else:
+        model.load_state_dict(checkpoint)
         
-        with h5py.File(self.h5_path, 'r') as hf:
-            self.total_samples = hf['support_images'].shape[0] * hf['support_images'].shape[1]
+    return get_model_weights(model)
 
-    def __len__(self):
-        return self.total_samples
+def import_model_class(architecture):
+    """Dynamically imports the model class from the meta_baseline.models module."""
+    try:
+        module_path = f"meta_baseline.models.{architecture}"
+        module = importlib.import_module(module_path)
+        return module.SameDifferentCNN
+    except ImportError:
+        print(f"Error: Could not import model for architecture '{architecture}'.")
+        print(f"Attempted to import from '{module_path}'. Please check the file and class names.")
+        sys.exit(1)
 
-    def __getitem__(self, idx):
-        if self.file is None:
-            self.file = h5py.File(self.h5_path, 'r')
-        
-        num_support_per_ep = self.file['support_images'].shape[1]
-        episode_idx = idx // num_support_per_ep
-        item_idx_in_episode = idx % num_support_per_ep
-        
-        image = self.file['support_images'][episode_idx, item_idx_in_episode]
-        label = self.file['support_labels'][episode_idx, item_idx_in_episode]
-        
-        if self.transform:
-            image = self.transform(image)
-            
-        return image, torch.from_numpy(np.array(label)).long()
-
-def flatten_weights(model):
-    return np.concatenate([p.cpu().detach().numpy().flatten() for p in model.parameters()])
-
-def flatten_weights_from_state_dict(state_dict):
-    """Flattens weights directly from a state_dict, bypassing model instantiation."""
-    return np.concatenate([p.cpu().numpy().flatten() for p in state_dict.values()])
-
-def adapt_model(model, loader, device, lr, steps):
-    learner = copy.deepcopy(model)
-    learner.to(device)
-    optimizer = torch.optim.Adam(learner.parameters(), lr=lr)
-    loss_fn = nn.CrossEntropyLoss()
-
-    learner.train()
-    for _ in range(steps):
-        for batch_images, batch_labels in loader:
-            batch_images, batch_labels = batch_images.to(device), batch_labels.to(device)
-            optimizer.zero_grad()
-            predictions = learner(batch_images)
-            error = loss_fn(predictions, batch_labels)
-            error.backward()
-            optimizer.step()
-    learner.eval()
-    return learner
-
-def main(args):
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(exist_ok=True, parents=True)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-
-    # --- Load Base Models ---
-    vanilla_path = Path(args.vanilla_models_dir) / f"regular/conv6/seed_{args.vanilla_seed}/initial_model.pth"
-    vanilla_model = VanillaModel()
-    vanilla_model.load_state_dict(torch.load(vanilla_path, map_location='cpu'))
-    vanilla_pre_weights = flatten_weights(vanilla_model)
-
-    # --- Load Pre-Trained PB Meta-Model ---
-    pb_meta_path = Path(args.meta_models_dir) / f"seed_{args.meta_seed}/model_seed_{args.meta_seed}_checkpoint_epoch_80.pt"
-    pb_meta_model = MetaConv6Model()
-    pb_checkpoint = torch.load(pb_meta_path, map_location='cpu')
-    pb_meta_model.load_state_dict(pb_checkpoint['model_state_dict'], strict=False)
-    pb_meta_pre_weights = flatten_weights(pb_meta_model)
-
-    # --- Load Naturalistic Meta-Trained Models ---
-    naturalistic_deltas = []
-    naturalistic_base_path = Path(args.naturalistic_models_dir)
-    print("\n--- Loading Naturalistic Meta-Trained Models ---")
-    for seed in args.naturalistic_seeds:
-        try:
-            model_path = naturalistic_base_path / f"conv6lr/seed_{seed}/conv6lr/seed_{seed}/conv6lr_best.pth"
-            if not model_path.exists():
-                print(f"  Warning: Could not find model file for naturalistic seed {seed} at {model_path}. Skipping.")
-                continue
-            
-            print(f"Loading naturalistic model from seed {seed}")
-            naturalistic_model = MetaConv6Model()
-            checkpoint = torch.load(model_path, map_location='cpu')
-            naturalistic_model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-            
-            # This delta represents the entire naturalistic meta-training process
-            # as a single vector from the common random start point.
-            naturalistic_weights = flatten_weights(naturalistic_model)
-            delta = naturalistic_weights - vanilla_pre_weights
-            naturalistic_deltas.append(delta)
-        except Exception as e:
-            print(f"  Warning: Error loading model for naturalistic seed {seed}: {e}. Skipping.")
-
-    # --- Task and Data Collection Setup ---
-    tasks = ['arrows', 'filled', 'irregular', 'lines', 'open', 'regular']
-    vanilla_adaptation_deltas = []
-    pb_meta_adaptation_deltas = []
-
-    # --- Adaptation Loop ---
-    for task in tqdm(tasks, desc="Adapting to tasks"):
-        data_path = Path(args.data_base_dir) / f"{task}_support{args.support_size}_train.h5"
-        if not data_path.exists():
-            print(f"  Warning: Data for task '{task}' not found at {data_path}. Skipping.")
-            continue
-        
-        print(f"\n--- Adapting to {task} ---")
-        # Adapt Vanilla Model
-        loader = DataLoader(SimpleHDF5Dataset(data_path, transform=T.Compose([T.ToPILImage(), T.Resize((128, 128)), T.ToTensor()])), batch_size=args.adaptation_batch_size, shuffle=True)
-        adapted_vanilla = adapt_model(vanilla_model, loader, device, args.lr, args.steps)
-        vanilla_post_weights = flatten_weights(adapted_vanilla)
-        vanilla_adaptation_deltas.append(vanilla_post_weights - vanilla_pre_weights)
-
-        # Adapt PB-Meta-Trained Model
-        adapted_pb_meta = adapt_model(pb_meta_model, loader, device, args.lr, args.steps)
-        pb_meta_post_weights = flatten_weights(adapted_pb_meta)
-        pb_meta_adaptation_deltas.append(pb_meta_post_weights - pb_meta_pre_weights)
-
-    # --- PCA on Adaptation Vectors ---
-    print("\n--- Performing PCA on All Change Vectors ---")
-    # Combine all three types of "change" vectors to be visualized from a common origin
-    all_deltas = vanilla_adaptation_deltas + pb_meta_adaptation_deltas + naturalistic_deltas
-
-    max_len = max(len(d) for d in all_deltas)
-    padded_deltas = np.vstack([np.pad(d, (0, max_len - len(d)), 'constant') for d in all_deltas])
+def main():
+    parser = argparse.ArgumentParser(description="Visualize model weight space using PCA.")
+    parser.add_argument('--architecture', type=str, required=True, choices=['conv2', 'conv4', 'conv6'], help='Model architecture to visualize.')
+    parser.add_argument('--seeds', type=int, nargs='+', default=[42, 123, 555, 789, 999], help='List of random seeds to process.')
     
-    pca = PCA(n_components=2, random_state=42)
-    pcs = pca.fit_transform(padded_deltas)
-
-    # --- Plotting ---
-    print("\n--- Generating Plot ---")
-    fig, ax = plt.subplots(figsize=(14, 12))
+    # Directories for different model types
+    parser.add_argument('--naturalistic_results_dir', type=str, default="results_naturalistic_meta_test", help="Directory for naturalistic MAML models.")
+    parser.add_argument('--vanilla_results_dir', type=str, default="logs_naturalistic_vanilla", help="Directory for naturalistic Vanilla models.")
+    parser.add_argument('--pb_results_dir', type=str, default="results/pb_retrained_conv6lr", help="Directory for PB-retrained MAML models.")
     
-    num_vanilla_deltas = len(vanilla_adaptation_deltas)
-    num_pb_meta_deltas = len(pb_meta_adaptation_deltas)
-    
-    vanilla_pcs = pcs[:num_vanilla_deltas]
-    pb_meta_pcs = pcs[num_vanilla_deltas : num_vanilla_deltas + num_pb_meta_deltas]
-    naturalistic_pcs = pcs[num_vanilla_deltas + num_pb_meta_deltas:]
-    
-    # Plot spokes from origin
-    origin = np.array([0, 0])
-
-    # Plot Vanilla Adaptation
-    for i in range(vanilla_pcs.shape[0]):
-        ax.arrow(origin[0], origin[1], vanilla_pcs[i, 0], vanilla_pcs[i, 1], 
-                 color='royalblue', ls='--', lw=1.5, head_width=0.2, label='Vanilla Adaptation' if i == 0 else "")
-
-    # Plot PB-Meta Adaptation
-    for i in range(pb_meta_pcs.shape[0]):
-        ax.arrow(origin[0], origin[1], pb_meta_pcs[i, 0], pb_meta_pcs[i, 1], 
-                 color='darkorange', ls='-', lw=2, head_width=0.2, label='PB-Meta Adaptation' if i == 0 else "")
-
-    # Plot Naturalistic Meta-Training vectors
-    for i in range(naturalistic_pcs.shape[0]):
-        ax.arrow(origin[0], origin[1], naturalistic_pcs[i, 0], naturalistic_pcs[i, 1], 
-                 color='forestgreen', ls=':', lw=2.5, head_width=0.2, label='Naturalistic Meta-Training' if i == 0 else "")
-
-    ax.scatter(origin[0], origin[1], c='black', s=150, zorder=5, marker='o', label='Shared Start Point')
-    
-    ax.set_title('PCA of Adaptation & Training Vectors from a Common Origin', fontsize=18)
-    ax.set_xlabel(f'Principal Component 1 ({pca.explained_variance_ratio_[0]:.2%})', fontsize=14)
-    ax.set_ylabel(f'Principal Component 2 ({pca.explained_variance_ratio_[1]:.2%})', fontsize=14)
-    ax.legend(fontsize=12)
-    ax.grid(True)
-    ax.axhline(0, color='grey', lw=0.5)
-    ax.axvline(0, color='grey', lw=0.5)
-    
-    plot_path = output_dir / 'multi_task_adaptation_delta_pca.png'
-    plt.savefig(plot_path, bbox_inches='tight')
-    print(f"\nPlot saved to {plot_path}")
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Visualize multi-task adaptation trajectories from a single starting point.")
-    
-    # --- Paths and Seeds ---
-    parser.add_argument('--vanilla_models_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/single_task/results/pb_single_task', help='Base directory for initial Vanilla-PB models.')
-    parser.add_argument('--meta_models_dir', type=str, default='/scratch/gpfs/mg7411/exp1_(untested)conv6lr_runs_20250127_110352', help='Directory for trained 6-layer Meta-PB models.')
-    parser.add_argument('--naturalistic_models_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/logs_naturalistic_meta', help='Base directory for meta-models trained on naturalistic data.')
-    parser.add_argument('--data_base_dir', type=str, default='/scratch/gpfs/mg7411/data/pb/pb', help='Base directory containing PB task HDF5 files.')
-    parser.add_argument('--output_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/visualizations/multi_task_pca', help='Directory to save the output plot.')
-    parser.add_argument('--vanilla_seed', type=int, default=0, help='Seed for the single vanilla model to use.')
-    parser.add_argument('--meta_seed', type=int, default=1, help='Seed for the single meta model to use (e.g., 0, 1, or 2).')
-    parser.add_argument('--naturalistic_seeds', type=int, nargs='+', default=[42, 123, 555, 789, 999], help='List of seeds for the naturalistic meta-trained models.')
-
-    # --- Hyperparameters ---
-    parser.add_argument('--lr', type=float, default=0.001, help='Unified learning rate for adaptation.')
-    parser.add_argument('--steps', type=int, default=5, help='Number of adaptation steps.')
-    parser.add_argument('--adaptation_batch_size', type=int, default=64, help='Batch size for adaptation.')
-    parser.add_argument('--support_size', type=int, default=6, help='Support size (e.g., 6 for arrows_support6_train.h5) to use for tasks.')
-
+    parser.add_argument('--output_dir', type=str, default="visualizations/multi_task_pca", help="Directory to save the PCA plots.")
     args = parser.parse_args()
-    main(args) 
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model_class = import_model_class(args.architecture)
+    arch_name = args.architecture + 'lr' if 'conv' in args.architecture else args.architecture
+
+    all_weights = []
+    all_labels = []
+
+    # --- 1. Load MAML (Naturalistic) Weights ---
+    print("--- Loading MAML (Naturalistic) Weights ---")
+    nat_maml_dir = Path(args.naturalistic_results_dir) / arch_name
+    for seed in args.seeds:
+        initial_path = nat_maml_dir / f"seed_{seed}" / "initial_model.pth"
+        final_path = nat_maml_dir / f"seed_{seed}" / "final_model.pth"
+        if initial_path.exists():
+            all_weights.append(load_weights_from_path(initial_path, model_class, device))
+            all_labels.append("MAML (Nat) Initial")
+        if final_path.exists():
+            all_weights.append(load_weights_from_path(final_path, model_class, device))
+            all_labels.append("MAML (Nat) Final")
+
+    # --- 2. Load Vanilla (Naturalistic) Weights ---
+    print("\n--- Loading Vanilla (Naturalistic) Weights ---")
+    # Vanilla initial weights are the same as MAML initial weights
+    for seed in args.seeds:
+        initial_path = nat_maml_dir / f"seed_{seed}" / "initial_model.pth"
+        if initial_path.exists():
+            all_weights.append(load_weights_from_path(initial_path, model_class, device))
+            all_labels.append("Vanilla (Nat) Initial")
+
+        final_path = Path(args.vanilla_results_dir) / arch_name / f"seed_{seed}" / "final_model.pth"
+        if final_path.exists():
+            all_weights.append(load_weights_from_path(final_path, model_class, device))
+            all_labels.append("Vanilla (Nat) Final")
+
+    # --- 3. Load MAML (PB-Trained) Weights ---
+    print("\n--- Loading MAML (PB-Trained) Weights ---")
+    pb_dir = Path(args.pb_results_dir) / args.architecture
+    for seed in args.seeds:
+        # Re-create initial state for PB models since it wasn't saved
+        set_seed(seed)
+        initial_model = model_class().to(device)
+        all_weights.append(get_model_weights(initial_model))
+        all_labels.append("MAML (PB) Initial")
+
+        final_path = pb_dir / f"seed_{seed}" / "best_model.pt"
+        if final_path.exists():
+            all_weights.append(load_weights_from_path(final_path, model_class, device))
+            all_labels.append("MAML (PB) Final")
+            
+    # --- Shape Consistency Check ---
+    print("\n--- Checking for Shape Consistency ---")
+    if not all_weights:
+        print("Error: No weights were loaded. Exiting.")
+        return
+        
+    shapes = [w.shape for w in all_weights]
+    most_common_shape = max(set(shapes), key=shapes.count)
+    
+    filtered_weights = [w for w, s in zip(all_weights, shapes) if s == most_common_shape]
+    filtered_labels = [l for l, s in zip(all_labels, shapes) if s == most_common_shape]
+    
+    if len(filtered_weights) != len(all_weights):
+        print(f"Warning: Original weights count: {len(all_weights)}. Filtered count: {len(filtered_weights)}.")
+        print(f"Keeping weights with shape: {most_common_shape}")
+
+    if len(filtered_weights) < 2:
+        print("Error: Fewer than 2 valid weight vectors loaded. Cannot perform PCA.")
+        return
+
+    # --- PCA and Plotting ---
+    print("\n--- Performing PCA and Plotting ---")
+    pca = PCA(n_components=2)
+    projected_weights = pca.fit_transform(np.vstack(filtered_weights))
+
+    fig, ax = plt.subplots(figsize=(12, 10))
+    
+    unique_styles = [
+        ("MAML (PB) Initial", "x", "#ff7f0e"),      # Orange X
+        ("MAML (PB) Final", "P", "#ff7f0e"),        # Orange Plus
+        ("MAML (Nat) Initial", "x", "#1f77b4"),     # Blue X
+        ("MAML (Nat) Final", "o", "#1f77b4"),       # Blue Circle
+        ("Vanilla (Nat) Initial", "x", "#2ca02c"),  # Green X (Same as MAML Nat Initial)
+        ("Vanilla (Nat) Final", "s", "#2ca02c"),    # Green Square
+    ]
+    style_map = {label: (marker, color) for label, marker, color in unique_styles}
+
+    for i, label in enumerate(filtered_labels):
+        marker, color = style_map.get(label, ("d", "grey")) # Default: diamond, grey
+        ax.scatter(projected_weights[i, 0], projected_weights[i, 1],
+                   marker=marker, color=color, s=100, alpha=0.8, label=label)
+
+    # Add lines connecting initial to final states
+    for seed in args.seeds:
+        # PB line
+        try:
+            initial_pb_idx = filtered_labels.index("MAML (PB) Initial")
+            final_pb_idx = filtered_labels.index("MAML (PB) Final")
+            ax.plot([projected_weights[initial_pb_idx, 0], projected_weights[final_pb_idx, 0]],
+                    [projected_weights[initial_pb_idx, 1], projected_weights[final_pb_idx, 1]],
+                    color='#ff7f0e', linestyle='--', alpha=0.5)
+        except ValueError:
+            pass # A point might be missing
+            
+        # MAML Naturalistic line
+        try:
+            initial_nat_maml_idx = filtered_labels.index("MAML (Nat) Initial")
+            final_nat_maml_idx = filtered_labels.index("MAML (Nat) Final")
+            ax.plot([projected_weights[initial_nat_maml_idx, 0], projected_weights[final_nat_maml_idx, 0]],
+                    [projected_weights[initial_nat_maml_idx, 1], projected_weights[final_nat_maml_idx, 1]],
+                    color='#1f77b4', linestyle='--', alpha=0.5)
+        except ValueError:
+            pass
+
+        # Vanilla Naturalistic line
+        try:
+            initial_nat_van_idx = filtered_labels.index("Vanilla (Nat) Initial")
+            final_nat_van_idx = filtered_labels.index("Vanilla (Nat) Final")
+            ax.plot([projected_weights[initial_nat_van_idx, 0], projected_weights[final_nat_van_idx, 0]],
+                    [projected_weights[initial_nat_van_idx, 1], projected_weights[final_nat_van_idx, 1]],
+                    color='#2ca02c', linestyle='--', alpha=0.5)
+        except ValueError:
+            pass
+            
+    ax.set_title(f"PCA of Model Weights for {args.architecture.upper()} Architecture", fontsize=16)
+    ax.set_xlabel("Principal Component 1", fontsize=12)
+    ax.set_ylabel("Principal Component 2", fontsize=12)
+
+    legend_elements = [
+        Line2D([0], [0], marker=marker, color='w', label=label, markerfacecolor=color, markersize=10)
+        for label, marker, color in unique_styles
+    ]
+    ax.legend(handles=legend_elements, title="Weight States", loc="best")
+
+    plt.grid(True, linestyle='--', alpha=0.6)
+    output_path = Path(args.output_dir) / f"pca_weights_{arch_name}.png"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, bbox_inches='tight')
+    plt.close()
+
+    print(f"\nPCA plot saved to {output_path}")
+
+if __name__ == "__main__":
+    main() 
