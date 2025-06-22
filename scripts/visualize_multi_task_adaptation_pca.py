@@ -43,7 +43,9 @@ def load_weights_from_path(model_path, model_class, device):
 def import_model_class(architecture):
     """Dynamically imports the model class from the meta_baseline.models module."""
     try:
-        module_path = f"meta_baseline.models.{architecture}"
+        # Correctly form the module name, e.g., 'conv6' -> 'conv6lr'
+        module_name = architecture + 'lr' if 'conv' in architecture else architecture
+        module_path = f"meta_baseline.models.{module_name}"
         module = importlib.import_module(module_path)
         return module.SameDifferentCNN
     except ImportError:
