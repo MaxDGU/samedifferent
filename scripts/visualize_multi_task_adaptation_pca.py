@@ -79,6 +79,95 @@ def import_legacy_model_class(architecture):
         print(f"Error: Class 'SameDifferentCNN' not found in '{module_path}'.")
         sys.exit(1)
 
+def generate_pca_plot(weights, labels, arch_name, output_dir, suffix):
+    """Performs PCA and generates a plot for a given set of weights."""
+    print(f"\n--- Generating PCA for {suffix} Architecture ---")
+    
+    # 1. Shape Consistency Check
+    if not weights:
+        print("No weights provided. Skipping plot.")
+        return
+        
+    shapes = [w.shape for w in weights]
+    most_common_shape = max(set(shapes), key=shapes.count)
+    
+    filtered_weights = [w for w, s in zip(weights, shapes) if s == most_common_shape]
+    filtered_labels = [l for l, s in zip(labels, shapes) if s == most_common_shape]
+    
+    if len(filtered_weights) != len(weights):
+        print(f"  Warning: Original weights count: {len(weights)}. Filtered count: {len(filtered_weights)}.")
+        print(f"  Keeping weights with shape: {most_common_shape}")
+
+    if len(filtered_weights) < 2:
+        print("  Error: Fewer than 2 valid weight vectors. Cannot perform PCA.")
+        return
+
+    # 2. PCA
+    pca = PCA(n_components=2)
+    projected_weights = pca.fit_transform(np.vstack(filtered_weights))
+    print(f"  PCA complete. Explained variance: {pca.explained_variance_ratio_}")
+
+    # 3. Plotting
+    fig, ax = plt.subplots(figsize=(12, 10))
+    
+    unique_styles = [
+        ("MAML (PB) Initial", "x", "#ff7f0e"),
+        ("MAML (PB) Final", "P", "#ff7f0e"),
+        ("MAML (Nat) Initial", "x", "#1f77b4"),
+        ("MAML (Nat) Final", "o", "#1f77b4"),
+        ("Vanilla (Nat) Initial", "x", "#1f77b4"), # Use same color as MAML Nat for shared initial state
+        ("Vanilla (Nat) Final", "s", "#2ca02c"),
+    ]
+    style_map = {label: (marker, color) for label, marker, color in unique_styles}
+
+    # Plot points
+    for i, label in enumerate(filtered_labels):
+        marker, color = style_map.get(label, ("d", "grey"))
+        ax.scatter(projected_weights[i, 0], projected_weights[i, 1],
+                   marker=marker, color=color, s=120, alpha=0.8, zorder=5)
+
+    # Plot lines connecting initial to final states
+    unique_prefixes = sorted(list(set(l.rsplit(' ', 1)[0] for l in filtered_labels)))
+    for prefix in unique_prefixes:
+        initial_label = f"{prefix} Initial"
+        final_label = f"{prefix} Final"
+        
+        initial_indices = [i for i, l in enumerate(filtered_labels) if l == initial_label]
+        final_indices = [i for i, l in enumerate(filtered_labels) if l == final_label]
+        
+        # Draw lines between corresponding initial and final points
+        for i_idx in initial_indices:
+            # Simple heuristic: connect to nearest final point of same type
+            if not final_indices: continue
+            distances = [np.linalg.norm(projected_weights[i_idx] - projected_weights[f_idx]) for f_idx in final_indices]
+            f_idx = final_indices[np.argmin(distances)]
+
+            _, color = style_map.get(initial_label, ("d", "grey"))
+            ax.plot([projected_weights[i_idx, 0], projected_weights[f_idx, 0]],
+                    [projected_weights[i_idx, 1], projected_weights[f_idx, 1]],
+                    color=color, linestyle='--', alpha=0.4, zorder=1)
+
+    ax.set_title(f"PCA of Model Weights for {arch_name.upper()} ({suffix} Arch)", fontsize=16)
+    ax.set_xlabel("Principal Component 1", fontsize=12)
+    ax.set_ylabel("Principal Component 2", fontsize=12)
+
+    # Create legend from the styles relevant to this plot
+    relevant_styles = [style for style in unique_styles if any(style[0] in l for l in filtered_labels)]
+    legend_elements = [
+        Line2D([0], [0], marker=marker, color='w', label=label, markerfacecolor=color, markersize=10)
+        for label, marker, color in relevant_styles
+    ]
+    if legend_elements:
+        ax.legend(handles=legend_elements, title="Weight States", loc="best")
+
+    plt.grid(True, linestyle='--', alpha=0.6)
+    output_path = Path(output_dir) / f"pca_weights_{arch_name}_{suffix.lower()}.png"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, bbox_inches='tight')
+    plt.close()
+
+    print(f"PCA plot saved to {output_path}")
+
 def main():
     parser = argparse.ArgumentParser(description="Visualize model weight space using PCA.")
     parser.add_argument('--architecture', type=str, required=True, choices=['conv2', 'conv4', 'conv6'], help='Model architecture to visualize.')
@@ -189,77 +278,21 @@ def main():
         print("Error: Fewer than 2 valid weight vectors loaded. Cannot perform PCA.")
         return
 
-    # --- PCA and Plotting ---
-    print("\n--- Performing PCA and Plotting ---")
-    pca = PCA(n_components=2)
-    projected_weights = pca.fit_transform(np.vstack(filtered_weights))
+    # --- Partition weights by architecture ---
+    legacy_weights, legacy_labels = [], []
+    new_arch_weights, new_arch_labels = [], []
 
-    fig, ax = plt.subplots(figsize=(12, 10))
-    
-    unique_styles = [
-        ("MAML (PB) Initial", "x", "#ff7f0e"),      # Orange X
-        ("MAML (PB) Final", "P", "#ff7f0e"),        # Orange Plus
-        ("MAML (Nat) Initial", "x", "#1f77b4"),     # Blue X
-        ("MAML (Nat) Final", "o", "#1f77b4"),       # Blue Circle
-        ("Vanilla (Nat) Initial", "x", "#2ca02c"),  # Green X (Same as MAML Nat Initial)
-        ("Vanilla (Nat) Final", "s", "#2ca02c"),    # Green Square
-    ]
-    style_map = {label: (marker, color) for label, marker, color in unique_styles}
-
-    for i, label in enumerate(filtered_labels):
-        marker, color = style_map.get(label, ("d", "grey")) # Default: diamond, grey
-        ax.scatter(projected_weights[i, 0], projected_weights[i, 1],
-                   marker=marker, color=color, s=100, alpha=0.8, label=label)
-
-    # Add lines connecting initial to final states
-    for seed in args.seeds:
-        # PB line
-        try:
-            initial_pb_idx = filtered_labels.index("MAML (PB) Initial")
-            final_pb_idx = filtered_labels.index("MAML (PB) Final")
-            ax.plot([projected_weights[initial_pb_idx, 0], projected_weights[final_pb_idx, 0]],
-                    [projected_weights[initial_pb_idx, 1], projected_weights[final_pb_idx, 1]],
-                    color='#ff7f0e', linestyle='--', alpha=0.5)
-        except ValueError:
-            pass # A point might be missing
+    for w, l in zip(all_weights, all_labels):
+        if "PB" in l:
+            new_arch_weights.append(w)
+            new_arch_labels.append(l)
+        else:
+            legacy_weights.append(w)
+            legacy_labels.append(l)
             
-        # MAML Naturalistic line
-        try:
-            initial_nat_maml_idx = filtered_labels.index("MAML (Nat) Initial")
-            final_nat_maml_idx = filtered_labels.index("MAML (Nat) Final")
-            ax.plot([projected_weights[initial_nat_maml_idx, 0], projected_weights[final_nat_maml_idx, 0]],
-                    [projected_weights[initial_nat_maml_idx, 1], projected_weights[final_nat_maml_idx, 1]],
-                    color='#1f77b4', linestyle='--', alpha=0.5)
-        except ValueError:
-            pass
-
-        # Vanilla Naturalistic line
-        try:
-            initial_nat_van_idx = filtered_labels.index("Vanilla (Nat) Initial")
-            final_nat_van_idx = filtered_labels.index("Vanilla (Nat) Final")
-            ax.plot([projected_weights[initial_nat_van_idx, 0], projected_weights[final_nat_van_idx, 0]],
-                    [projected_weights[initial_nat_van_idx, 1], projected_weights[final_nat_van_idx, 1]],
-                    color='#2ca02c', linestyle='--', alpha=0.5)
-        except ValueError:
-            pass
-            
-    ax.set_title(f"PCA of Model Weights for {args.architecture.upper()} Architecture", fontsize=16)
-    ax.set_xlabel("Principal Component 1", fontsize=12)
-    ax.set_ylabel("Principal Component 2", fontsize=12)
-
-    legend_elements = [
-        Line2D([0], [0], marker=marker, color='w', label=label, markerfacecolor=color, markersize=10)
-        for label, marker, color in unique_styles
-    ]
-    ax.legend(handles=legend_elements, title="Weight States", loc="best")
-
-    plt.grid(True, linestyle='--', alpha=0.6)
-    output_path = Path(args.output_dir) / f"pca_weights_{arch_name}.png"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, bbox_inches='tight')
-    plt.close()
-
-    print(f"\nPCA plot saved to {output_path}")
+    # --- Generate a plot for each architecture ---
+    generate_pca_plot(legacy_weights, legacy_labels, arch_name, args.output_dir, "Legacy")
+    generate_pca_plot(new_arch_weights, new_arch_labels, arch_name, args.output_dir, "New")
 
 if __name__ == "__main__":
     main() 
