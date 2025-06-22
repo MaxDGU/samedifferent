@@ -58,6 +58,8 @@ def main():
                         help='Number of training epochs')
     parser.add_argument('--support_size', type=int, nargs='+', default=[10],
                         help='A list of support sizes to use for training (e.g., 4 6 8 10)')
+    parser.add_argument('--test_support_size', type=int, nargs='+', default=[10],
+                        help='A list of support sizes to use for testing (e.g., 10)')
     parser.add_argument('--adaptation_steps', type=int, default=5,
                         help='Number of adaptation steps during training')
     parser.add_argument('--test_adaptation_steps', type=int, default=15,
@@ -201,7 +203,7 @@ def main():
         test_results = {}
         for task in PB_TASKS:
             print(f"\nTesting on task: {task}")
-            test_dataset = SameDifferentDataset(args.data_dir, [task], 'test', support_sizes=[args.support_size])
+            test_dataset = SameDifferentDataset(args.data_dir, [task], 'test', support_sizes=args.test_support_size)
             test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, 
                                    num_workers=1, pin_memory=True,
                                    collate_fn=collate_episodes)
