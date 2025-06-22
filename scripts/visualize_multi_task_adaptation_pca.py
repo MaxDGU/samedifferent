@@ -77,43 +77,70 @@ def main():
     print("--- Loading MAML (Naturalistic) Weights ---")
     nat_maml_dir = Path(args.naturalistic_results_dir) / arch_name
     for seed in args.seeds:
+        print(f"\n- Seed {seed}:")
         initial_path = nat_maml_dir / f"seed_{seed}" / "initial_model.pth"
         final_path = nat_maml_dir / f"seed_{seed}" / "final_model.pth"
+        
+        print(f"  Checking for initial model: {initial_path}")
         if initial_path.exists():
             all_weights.append(load_weights_from_path(initial_path, model_class, device))
             all_labels.append("MAML (Nat) Initial")
+            print("    -> Found and loaded.")
+        else:
+            print("    -> Not found.")
+
+        print(f"  Checking for final model: {final_path}")
         if final_path.exists():
             all_weights.append(load_weights_from_path(final_path, model_class, device))
             all_labels.append("MAML (Nat) Final")
+            print("    -> Found and loaded.")
+        else:
+            print("    -> Not found.")
 
     # --- 2. Load Vanilla (Naturalistic) Weights ---
     print("\n--- Loading Vanilla (Naturalistic) Weights ---")
     # Vanilla initial weights are the same as MAML initial weights
     for seed in args.seeds:
+        print(f"\n- Seed {seed}:")
         initial_path = nat_maml_dir / f"seed_{seed}" / "initial_model.pth"
+        final_path = Path(args.vanilla_results_dir) / arch_name / f"seed_{seed}" / "final_model.pth"
+
+        print(f"  Checking for initial model: {initial_path} (re-used from MAML)")
         if initial_path.exists():
             all_weights.append(load_weights_from_path(initial_path, model_class, device))
             all_labels.append("Vanilla (Nat) Initial")
+            print("    -> Found and loaded.")
+        else:
+            print("    -> Not found.")
 
-        final_path = Path(args.vanilla_results_dir) / arch_name / f"seed_{seed}" / "final_model.pth"
+        print(f"  Checking for final model: {final_path}")
         if final_path.exists():
             all_weights.append(load_weights_from_path(final_path, model_class, device))
             all_labels.append("Vanilla (Nat) Final")
+            print("    -> Found and loaded.")
+        else:
+            print("    -> Not found.")
 
     # --- 3. Load MAML (PB-Trained) Weights ---
     print("\n--- Loading MAML (PB-Trained) Weights ---")
     pb_dir = Path(args.pb_results_dir) / args.architecture
     for seed in args.seeds:
+        print(f"\n- Seed {seed}:")
         # Re-create initial state for PB models since it wasn't saved
         set_seed(seed)
         initial_model = model_class().to(device)
         all_weights.append(get_model_weights(initial_model))
         all_labels.append("MAML (PB) Initial")
+        print("  Created initial PB model weights.")
 
         final_path = pb_dir / f"seed_{seed}" / "best_model.pt"
+        print(f"  Checking for final model: {final_path}")
         if final_path.exists():
             all_weights.append(load_weights_from_path(final_path, model_class, device))
             all_labels.append("MAML (PB) Final")
+            print("    -> Found and loaded.")
+        else:
+            print("    -> Not found.")
             
     # --- Shape Consistency Check ---
     print("\n--- Checking for Shape Consistency ---")
