@@ -39,10 +39,10 @@ python -m meta_baseline.train_legacy_pb \
     --architecture conv6 \
     --seed ${SEED} \
     --epochs 100 \
-    --batch_size 32 \
-    --inner_lr 0.05 \
-    --outer_lr 0.001 \
-    --support_size 10 \
+    --batch_size 8 \
+    --inner_lr 0.001 \
+    --outer_lr 0.0001 \
+    --support_size 4 6 8 10 \
     --test_support_size 10 \
     --adaptation_steps 5 \
     --test_adaptation_steps 15
