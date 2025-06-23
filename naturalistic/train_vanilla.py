@@ -16,17 +16,20 @@ import argparse
 from pathlib import Path
 from torchvision import transforms
 
-# Import models from baselines
-from baselines.models.conv2 import SameDifferentCNN as Conv2CNN
-from baselines.models.conv4 import SameDifferentCNN as Conv4CNN
-from baselines.models.conv6 import SameDifferentCNN as Conv6CNN
+# Make sure the meta_baseline directory is in the Python path
+# This allows us to import the newer 'lr' models
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Define ARCHITECTURES dictionary to map string names to model classes
-# Using 'lr' suffix for consistency with MAML experiments if models are identical
+# Import the newer models from meta_baseline
+from meta_baseline.models.conv2lr import SameDifferentCNN as Conv2lrCNN
+from meta_baseline.models.conv4lr import SameDifferentCNN as Conv4lrCNN
+from meta_baseline.models.conv6lr import SameDifferentCNN as Conv6lrCNN
+
+# Define ARCHITECTURES dictionary to map string names to the correct model classes
 ARCHITECTURES = {
-    'conv2lr': Conv2CNN,
-    'conv4lr': Conv4CNN,
-    'conv6lr': Conv6CNN
+    'conv2lr': Conv2lrCNN,
+    'conv4lr': Conv4lrCNN,
+    'conv6lr': Conv6lrCNN
 }
 
 class NaturalisticDataset(Dataset):
@@ -60,12 +63,12 @@ class NaturalisticDataset(Dataset):
         
         if transform is None:
             # Default transforms if none provided
-        self.transform = transforms.Compose([
-            transforms.Resize((128, 128)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],  # ImageNet statistics
-                               std=[0.229, 0.224, 0.225])
-        ])
+            self.transform = transforms.Compose([
+                transforms.Resize((128, 128)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],  # ImageNet statistics
+                                   std=[0.229, 0.224, 0.225])
+            ])
         else:
             self.transform = transform
     
