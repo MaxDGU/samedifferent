@@ -34,7 +34,7 @@ echo "PYTHONPATH: ${PYTHONPATH}"
 # for the naturalistic experiments, allowing for a direct comparison.
 echo "Starting PB re-training with LEGACY conv6 for seed ${SEED}..."
 python -m meta_baseline.train_legacy_pb \
-    --data_dir /scratch/gpfs/mg7411/data/pb/pb \
+    --data_dir /scratch/gpfs/mg7411/samedifferent/data/meta_h5/pb \
     --output_dir /scratch/gpfs/mg7411/samedifferent/results/pb_retrained_legacy_conv6 \
     --architecture conv6 \
     --seed ${SEED} \
