@@ -30,9 +30,9 @@ sys.path.insert(0, str(project_root))
 
 try:
     # Import specific model classes directly
-    from baselines.models.conv2 import SameDifferentCNN as Conv2CNN
-    from baselines.models.conv4 import SameDifferentCNN as Conv4CNN
-    from baselines.models.conv6 import SameDifferentCNN as Conv6CNN
+    from meta_baseline.models.conv2lr import SameDifferentCNN as Conv2CNN
+    from meta_baseline.models.conv4lr import SameDifferentCNN as Conv4CNN
+    from meta_baseline.models.conv6lr import SameDifferentCNN as Conv6CNN
     print("Successfully imported Conv{2,4,6}lrCNN models from baselines.models")
 
     # # Attempt to import utils_meta - might fail, handle later
