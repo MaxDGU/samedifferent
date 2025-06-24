@@ -19,37 +19,30 @@ NEW_SEEDS = [111, 222, 333]
 
 def find_meta_slurm_output_file(arch, seed):
     """
-    Finds the SLURM output file for a given meta-learning run by doing a robust glob search.
+    Finds the SLURM output file by checking all known naming patterns.
     """
     if not SLURM_LOG_DIR.exists():
-        print(f"Warning: SLURM log directory not found at {SLURM_LOG_DIR}")
         return None
     
-    # Robustly search for any file containing the arch and seed. This is less brittle.
-    search_pattern = f"*_{arch}_*_{seed}_*.out"
-    found_files = list(SLURM_LOG_DIR.glob(search_pattern))
+    # List of all possible search patterns for meta-learning logs
+    # This is more robust than trying to calculate the task ID.
+    patterns = [
+        f"meta_nat_exp_add_seeds_*{seed}*_{arch}*.out",
+        f"meta_nat_exp_add_seeds_*{arch}*_{seed}*.out",
+        f"meta_nat_more_seeds_*{seed}*_{arch}*.out",
+        f"meta_nat_more_seeds_*{arch}*_{seed}*.out",
+        f"meta_nat_exp_*{seed}*_{arch}*.out",
+        f"meta_nat_exp_*{arch}*_{seed}*.out"
+    ]
     
-    if not found_files:
-        # Try another common ordering
-        search_pattern = f"*_{seed}_*_{arch}_*.out"
-        found_files = list(SLURM_LOG_DIR.glob(search_pattern))
-
-    if not found_files:
-        # Try to find based on old naming conventions as a final fallback
-        if seed in [111, 222, 333]:
-             search_pattern = f"meta_nat_more_seeds_*{seed}*.out"
-        else:
-             search_pattern = f"meta_nat_exp_add_seeds_*{seed}*.out"
-        found_files = list(SLURM_LOG_DIR.glob(search_pattern))
-
-    if not found_files:
-        return None
-    
-    if len(found_files) > 1:
-        print(f"Warning: Found multiple log files for {arch}/{seed}. Using most recent.")
-        found_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-        
-    return found_files[0]
+    for pattern in patterns:
+        found_files = list(SLURM_LOG_DIR.glob(pattern))
+        if found_files:
+            found_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+            # print(f"DEBUG: Found {found_files[0].name} for {arch}/{seed}")
+            return found_files[0]
+            
+    return None
 
 
 def scrape_accuracy_from_log(log_file, experiment_type='vanilla'):
@@ -206,16 +199,19 @@ def plot_results(vanilla_data, meta_data):
     plt.style.use('seaborn-v0_8-whitegrid')
     fig, ax = plt.subplots(figsize=(12, 8))
     
-    # --- ROBUST PLOTTING LOGIC ---
-    # This avoids the seaborn IndexError by plotting each group manually.
     bar_width = 0.35
     index = np.arange(len(ARCHITECTURES))
     
-    vanilla_means = df[df['Training Type'] == 'Vanilla']['Mean Accuracy']
-    vanilla_std = df[df['Training Type'] == 'Vanilla']['Std Dev']
+    # --- ROBUST PLOTTING LOGIC ---
+    vanilla_series = df[df['Training Type'] == 'Vanilla'].set_index('Architecture')
+    meta_series = df[df['Training Type'] == 'Meta-Trained'].set_index('Architecture')
+
+    # Reindex to ensure they align with the full list of architectures, filling missing with NaN
+    vanilla_means = vanilla_series['Mean Accuracy'].reindex(ARCHITECTURES, fill_value=0)
+    vanilla_std = vanilla_series['Std Dev'].reindex(ARCHITECTURES, fill_value=0)
     
-    meta_means = df[df['Training Type'] == 'Meta-Trained']['Mean Accuracy']
-    meta_std = df[df['Training Type'] == 'Meta-Trained']['Std Dev']
+    meta_means = meta_series['Mean Accuracy'].reindex(ARCHITECTURES, fill_value=0)
+    meta_std = meta_series['Std Dev'].reindex(ARCHITECTURES, fill_value=0)
     
     # Plot bars
     ax.bar(index - bar_width/2, vanilla_means, bar_width, yerr=vanilla_std,
