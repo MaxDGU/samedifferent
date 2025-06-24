@@ -141,13 +141,13 @@ def main():
     
     # 1. Load Naturalistic meta-trained models
     for seed in NAT_SEEDS:
-        path = Path(str(NAT_PATH_TEMPLATE).format(seed=seed)) # Path has special formatting
+        path = Path(str(NAT_PATH_TEMPLATE).format(seed=seed)) # CORRECTED: Convert to string before formatting
         w = load_and_flatten_weights(path)
         if w is not None: weights_collection['Naturalistic'].append(w)
 
     # 2. Load PB meta-trained models (pre- and post-adaptation)
     for seed in PB_SEEDS:
-        path = PB_PATH_TEMPLATE.format(seed=seed)
+        path = Path(str(PB_PATH_TEMPLATE).format(seed=seed)) # CORRECTED: Convert to string before formatting
         
         # Pre-adaptation
         w_pre = load_and_flatten_weights(path)
