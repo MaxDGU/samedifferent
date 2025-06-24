@@ -90,22 +90,23 @@ def adapt_model_and_flatten(model_path, support_images, support_labels):
     """Loads a model, adapts it on a given support set, and returns the new flattened weights."""
     if not model_path.exists(): return None
     
-    device = torch.device("cpu") # <--- FORCED CPU USAGE
-    
-    # Load the original model
-    original_model = MODEL_CLASS()
-    checkpoint = torch.load(model_path, map_location=device)
-    state_dict = checkpoint.get('model_state_dict', checkpoint)
-    original_model.load_state_dict(state_dict)
-    original_model.to(device)
+    device = torch.device("cpu") # Force CPU usage
+
+    try:
+        # Load the model state directly into the model we will adapt
+        adapted_model = MODEL_CLASS().to(device)
+        checkpoint = torch.load(model_path, map_location=device)
+        state_dict = checkpoint.get('model_state_dict', checkpoint)
+        adapted_model.load_state_dict(state_dict)
+        adapted_model.train()
+    except Exception as e:
+        print(f"Error loading model {model_path} for adaptation: {e}")
+        return None
     
     # --- DEBUGGING: Check weights before adaptation ---
     print(f"\nAdapting model from {model_path.name}...")
     weight_before = adapted_model.classifier.weight.detach().clone()
     
-    # Adapt the model
-    adapted_model = copy.deepcopy(original_model)
-    adapted_model.train()
     optimizer = optim.SGD(adapted_model.parameters(), lr=ADAPTATION_LR)
     loss_fn = nn.CrossEntropyLoss()
     
