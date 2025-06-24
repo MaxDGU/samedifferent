@@ -62,14 +62,14 @@ class H5EpisodicSupportSetDataset(Dataset):
         with h5py.File(self.h5_path, 'r') as f:
             episode_group = f[self.episode_keys[idx]]
             
-            # Load support set images and labels using the CORRECTED keys
+            # Load support set images and labels
             support_images = np.array(episode_group['support_images'])
             support_labels = np.array(episode_group['support_labels'])
             
             # Apply transformations to all images
             transformed_images = torch.stack([self.transform(img) for img in support_images])
             
-            return transformed_images, torch.tensor(support_labels, dtype=torch.float32)
+            return transformed_images, torch.tensor(support_labels, dtype=torch.long)
 
 # --- Core Functions ---
 def load_and_flatten_weights(model_path):
@@ -103,14 +103,14 @@ def adapt_model_and_flatten(model_path, support_images, support_labels):
     adapted_model = copy.deepcopy(original_model)
     adapted_model.train()
     optimizer = optim.SGD(adapted_model.parameters(), lr=ADAPTATION_LR)
-    loss_fn = nn.BCEWithLogitsLoss()
+    loss_fn = nn.CrossEntropyLoss()
     
     # Move the single support set to device
     support_images, support_labels = support_images.to(device), support_labels.to(device)
 
     for _ in range(ADAPTATION_STEPS):
         optimizer.zero_grad()
-        logits = adapted_model(support_images).squeeze()
+        logits = adapted_model(support_images)
         loss = loss_fn(logits, support_labels)
         loss.backward()
         optimizer.step()
