@@ -145,12 +145,11 @@ def main():
     first_episode_support_images, first_episode_support_labels = support_dataset[0]
     print(f"Using support set from episode '{support_dataset.episode_keys[0]}' for adaptation ({len(first_episode_support_labels)} samples).")
 
-    weights_collection = {'PB': [], 'Naturalistic': []}
-    trajectories = [] # To store the list of weight vectors for each PB seed's adaptation
+    weights_collection = {'PB_pre': [], 'Naturalistic': [], 'PB_post': []}
     
     # 1. Load Naturalistic meta-trained models
     for seed in NAT_SEEDS:
-        path = Path(str(NAT_PATH_TEMPLATE).format(seed=seed)) # CORRECTED: Convert to string before formatting
+        path = Path(str(NAT_PATH_TEMPLATE).format(seed=seed))
         w = load_and_flatten_weights(path)
         if w is not None: weights_collection['Naturalistic'].append(w)
 
@@ -158,64 +157,58 @@ def main():
     for seed in PB_SEEDS:
         path = Path(str(PB_PATH_TEMPLATE).format(seed=seed))
         
-        # The adaptation function now returns a list of weights (a trajectory)
         trajectory = adapt_model_and_flatten(path, first_episode_support_images, first_episode_support_labels)
         
         if trajectory:
-            weights_collection['PB'].append(trajectory[0]) # Pre-adaptation state
-            trajectories.append(trajectory) # Full trajectory
+            weights_collection['PB_pre'].append(trajectory[0])   # Pre-adaptation state
+            weights_collection['PB_post'].append(trajectory[-1]) # Post-adaptation state
         
-    # 3. Perform PCA on the start and end points only
-    # The end points are the last element of each trajectory
-    pb_end_points = [t[-1] for t in trajectories]
-    all_stable_weights = weights_collection['PB'] + weights_collection['Naturalistic'] + pb_end_points
+    # 3. Perform PCA on all collected weights
+    all_weights = sum(weights_collection.values(), [])
     
-    if len(all_stable_weights) < 2:
+    if len(all_weights) < 2:
         print("Not enough weights loaded to perform PCA. Exiting.")
         return
         
-    weights_matrix = np.array(all_stable_weights)
+    weights_matrix = np.array(all_weights)
     pca = PCA(n_components=2)
-    pca.fit(weights_matrix) # Fit PCA on stable points
+    transformed_weights = pca.fit_transform(weights_matrix)
     
-    # --- Print L2 norm of changes to confirm they are non-zero ---
-    print("\n--- Adaptation Change Magnitudes (L2 Norm) ---")
-    pb_pre_weights = np.array([t[0] for t in trajectories])
-    pb_post_weights = np.array([t[-1] for t in trajectories])
-    for i in range(len(pb_pre_weights)):
-        l2_diff = np.linalg.norm(pb_post_weights[i] - pb_pre_weights[i])
-        print(f"  Seed {PB_SEEDS[i]}: Change L2 Norm = {l2_diff:.4f}")
-
-    # 5. Calculate and transform the difference vectors (adaptation vectors)
-    adaptation_vectors = pb_post_weights - pb_pre_weights
-    # We apply the rotation of the PCA, not the full transform which includes centering
-    transformed_adaptation_vectors = np.dot(adaptation_vectors, pca.components_.T)
-
-    # 6. Plotting the adaptation vectors
+    # 4. Plotting
     plt.style.use('seaborn-v0_8-whitegrid')
-    fig, ax = plt.subplots(figsize=(10, 10))
+    fig, ax = plt.subplots(figsize=(12, 10))
     
-    # Use a quiver plot to show all vectors starting from the origin
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
-    for i in range(len(transformed_adaptation_vectors)):
-        ax.quiver(0, 0,
-                  transformed_adaptation_vectors[i, 0],
-                  transformed_adaptation_vectors[i, 1],
-                  angles='xy', scale_units='xy', scale=1,
-                  color=colors[i],
-                  label=f'Seed {PB_SEEDS[i]}')
+    # Create a mapping from flat index to label and original data
+    plot_data = {}
+    start_idx = 0
+    for label, w_list in weights_collection.items():
+        end_idx = start_idx + len(w_list)
+        plot_data[label] = transformed_weights[start_idx:end_idx]
+        start_idx = end_idx
 
-    ax.scatter(0, 0, color='k', marker='+', s=100, label='Origin (Pre-Adaptation State)', zorder=5)
+    # Plot points
+    ax.scatter(plot_data['Naturalistic'][:, 0], plot_data['Naturalistic'][:, 1], 
+               c='red', marker='s', s=150, label='Meta-Trained on Naturalistic', edgecolors='k', zorder=3)
+    ax.scatter(plot_data['PB_pre'][:, 0], plot_data['PB_pre'][:, 1],
+               c='blue', marker='o', s=150, label='Meta-Trained on PB (Pre-Adaptation)', edgecolors='k', zorder=3)
+    ax.scatter(plot_data['PB_post'][:, 0], plot_data['PB_post'][:, 1],
+               c='cyan', marker='X', s=150, label='Meta-Trained on PB (Post-Adaptation)', edgecolors='k', zorder=3)
+               
+    # Draw arrows from pre- to post-adaptation
+    for i in range(len(plot_data['PB_pre'])):
+        start_point = plot_data['PB_pre'][i]
+        end_point = plot_data['PB_post'][i]
+        ax.arrow(start_point[0], start_point[1], 
+                 end_point[0] - start_point[0], end_point[1] - start_point[1],
+                 head_width=0.01 * (ax.get_xlim()[1] - ax.get_xlim()[0]), # Scale arrow head
+                 fc='gray', ec='gray', length_includes_head=True, zorder=2, alpha=0.7)
 
-    ax.set_title('PCA of Conv6 Adaptation Vectors from PB to Naturalistic', fontsize=16)
+    ax.set_title('PCA of Conv6 Weights: Domain Adaptation from PB to Naturalistic', fontsize=16)
     ax.set_xlabel('Principal Component 1', fontsize=12)
     ax.set_ylabel('Principal Component 2', fontsize=12)
-    ax.legend()
-    # Set aspect ratio to equal to make directions clear
-    ax.set_aspect('equal', adjustable='box')
-    ax.grid(True)
+    ax.legend(fontsize=12)
     
-    output_path = OUTPUT_DIR / 'pca_conv6_adaptation_vectors.png'
+    output_path = OUTPUT_DIR / 'pca_conv6_domain_adaptation.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
     print(f"\nSuccessfully saved plot to {output_path}")
