@@ -14,56 +14,39 @@ SLURM_LOG_DIR = Path('slurm_logs') # Assumes you run this script from the projec
 
 # We need to replicate the SLURM array logic to find the correct log files
 ARCHITECTURES = ["conv2lr", "conv4lr", "conv6lr"]
-ALL_SEEDS = [42, 123, 555, 789, 999, 111, 222, 333] # <-- UPDATED to all 8 seeds
+ALL_SEEDS = [42, 123, 555, 789, 999, 111, 222, 333]
 NEW_SEEDS = [111, 222, 333]
 
 def find_meta_slurm_output_file(arch, seed):
     """
-    Finds the SLURM output file for a given meta-learning run
-    by replicating the SLURM array task ID logic.
+    Finds the SLURM output file for a given meta-learning run by doing a robust glob search.
     """
     if not SLURM_LOG_DIR.exists():
         print(f"Warning: SLURM log directory not found at {SLURM_LOG_DIR}")
         return None
     
-    try:
-        arch_index = ARCHITECTURES.index(arch)
-        # Determine which seed list and slurm script pattern to use
-        if seed in NEW_SEEDS:
-            seed_index = NEW_SEEDS.index(seed)
-            search_pattern = f"meta_nat_more_seeds_*_{seed_index * len(ARCHITECTURES) + arch_index}.out"
-        else:
-            # Logic for original seeds
-            original_seeds = [s for s in ALL_SEEDS if s not in NEW_SEEDS]
-            seed_index = original_seeds.index(seed)
-            # CORRECTED: Use the correct SLURM script name pattern
-            search_pattern = f"meta_nat_exp_add_seeds_*_{seed_index * len(ARCHITECTURES) + arch_index}.out"
-
-    except ValueError as e:
-        print(f"Warning: Could not find arch/seed in predefined list: {e}")
-        return None
-
-    num_archs = len(ARCHITECTURES)
-    task_id = seed_index * num_archs + arch_index
-    
+    # Robustly search for any file containing the arch and seed. This is less brittle.
+    search_pattern = f"*_{arch}_*_{seed}_*.out"
     found_files = list(SLURM_LOG_DIR.glob(search_pattern))
     
     if not found_files:
-        # Fallback search patterns
-        if seed in NEW_SEEDS:
-            # Fallback for the new seeds script name if the array logic was complex
-            search_pattern = f"meta_nat_more_seeds_*{task_id}.out" # Generic task_id search
-        else:
-            search_pattern = f"meta_nat_exp_add_seeds_*_{task_id}.out"
+        # Try another common ordering
+        search_pattern = f"*_{seed}_*_{arch}_*.out"
         found_files = list(SLURM_LOG_DIR.glob(search_pattern))
 
     if not found_files:
-        # print(f"Debug: No file found for pattern {search_pattern}")
+        # Try to find based on old naming conventions as a final fallback
+        if seed in [111, 222, 333]:
+             search_pattern = f"meta_nat_more_seeds_*{seed}*.out"
+        else:
+             search_pattern = f"meta_nat_exp_add_seeds_*{seed}*.out"
+        found_files = list(SLURM_LOG_DIR.glob(search_pattern))
+
+    if not found_files:
         return None
     
     if len(found_files) > 1:
-        print(f"Warning: Found multiple log files for task {task_id}. Using the most recent one.")
-        # Sort by modification time, newest first
+        print(f"Warning: Found multiple log files for {arch}/{seed}. Using most recent.")
         found_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
         
     return found_files[0]
@@ -221,24 +204,33 @@ def plot_results(vanilla_data, meta_data):
     df = pd.DataFrame(plot_data)
 
     plt.style.use('seaborn-v0_8-whitegrid')
-    fig, ax = plt.subplots(figsize=(10, 7))
+    fig, ax = plt.subplots(figsize=(12, 8))
     
-    sns.barplot(data=df, x='Architecture', y='Mean Accuracy', hue='Training Type', ax=ax, palette=['#1f77b4', '#ff7f0e'])
+    # --- ROBUST PLOTTING LOGIC ---
+    # This avoids the seaborn IndexError by plotting each group manually.
+    bar_width = 0.35
+    index = np.arange(len(ARCHITECTURES))
     
-    # --- CORRECTED & SIMPLIFIED Error Bar Logic ---
-    # This logic is more robust and avoids the IndexError
-    x_coords = [p.get_x() + 0.5 * p.get_width() for p in ax.patches]
-    y_coords = [p.get_height() for p in ax.patches]
-    # The order of patches in `ax.patches` matches the order of rows in the DataFrame
-    errors = df['Std Dev']
+    vanilla_means = df[df['Training Type'] == 'Vanilla']['Mean Accuracy']
+    vanilla_std = df[df['Training Type'] == 'Vanilla']['Std Dev']
     
-    ax.errorbar(x=x_coords, y=y_coords, yerr=errors, fmt='none', capsize=5, color='black')
+    meta_means = df[df['Training Type'] == 'Meta-Trained']['Mean Accuracy']
+    meta_std = df[df['Training Type'] == 'Meta-Trained']['Std Dev']
+    
+    # Plot bars
+    ax.bar(index - bar_width/2, vanilla_means, bar_width, yerr=vanilla_std,
+           capsize=5, label='Vanilla', color='#1f77b4')
+    ax.bar(index + bar_width/2, meta_means, bar_width, yerr=meta_std,
+           capsize=5, label='Meta-Trained', color='#ff7f0e')
 
     ax.set_title('Comparison of Vanilla vs. Meta-Trained Models on Naturalistic Data', fontsize=16)
     ax.set_ylabel('Mean Accuracy', fontsize=12)
     ax.set_xlabel('Model Architecture', fontsize=12)
-    ax.set_ylim(bottom=0.5) # Start y-axis at 0.5 for better visibility
+    ax.set_xticks(index)
+    ax.set_xticklabels([arch.upper() for arch in ARCHITECTURES])
+    ax.set_ylim(bottom=0.5)
     ax.legend(title='Training Type')
+    ax.grid(axis='x') # Remove vertical grid lines for clarity
     
     output_dir = Path('visualizations')
     output_dir.mkdir(exist_ok=True)
