@@ -178,44 +178,44 @@ def main():
     pca = PCA(n_components=2)
     pca.fit(weights_matrix) # Fit PCA on stable points
     
-    # 4. Transform all points (including intermediate ones) using the fitted PCA
-    transformed_trajectories = [pca.transform(np.array(t)) for t in trajectories]
-    transformed_naturalistic = pca.transform(np.array(weights_collection['Naturalistic']))
-    
-    # 5. Plotting
+    # --- Print L2 norm of changes to confirm they are non-zero ---
+    print("\n--- Adaptation Change Magnitudes (L2 Norm) ---")
+    pb_pre_weights = np.array([t[0] for t in trajectories])
+    pb_post_weights = np.array([t[-1] for t in trajectories])
+    for i in range(len(pb_pre_weights)):
+        l2_diff = np.linalg.norm(pb_post_weights[i] - pb_pre_weights[i])
+        print(f"  Seed {PB_SEEDS[i]}: Change L2 Norm = {l2_diff:.4f}")
+
+    # 5. Calculate and transform the difference vectors (adaptation vectors)
+    adaptation_vectors = pb_post_weights - pb_pre_weights
+    # We apply the rotation of the PCA, not the full transform which includes centering
+    transformed_adaptation_vectors = np.dot(adaptation_vectors, pca.components_.T)
+
+    # 6. Plotting the adaptation vectors
     plt.style.use('seaborn-v0_8-whitegrid')
-    fig, ax = plt.subplots(figsize=(12, 10))
+    fig, ax = plt.subplots(figsize=(10, 10))
     
-    # Plot Naturalistic points
-    ax.scatter(transformed_naturalistic[:, 0], transformed_naturalistic[:, 1], 
-               c='red', marker='s', s=200, label='Meta-Trained on Naturalistic', edgecolors='k', zorder=5)
+    # Use a quiver plot to show all vectors starting from the origin
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+    for i in range(len(transformed_adaptation_vectors)):
+        ax.quiver(0, 0,
+                  transformed_adaptation_vectors[i, 0],
+                  transformed_adaptation_vectors[i, 1],
+                  angles='xy', scale_units='xy', scale=1,
+                  color=colors[i],
+                  label=f'Seed {PB_SEEDS[i]}')
 
-    # Plot each trajectory
-    for i, t_traj in enumerate(transformed_trajectories):
-        # Plot full line for the trajectory
-        ax.plot(t_traj[:, 0], t_traj[:, 1], color='gray', alpha=0.6, zorder=2)
-        
-        # Plot start point (PB Pre-Adaptation)
-        ax.scatter(t_traj[0, 0], t_traj[0, 1],
-                   c='blue', marker='o', s=150, edgecolors='k', zorder=4,
-                   label='Meta-Trained on PB (Pre-Adaptation)' if i == 0 else "") # Label only once
-                   
-        # Plot end point (PB Post-Adaptation)
-        ax.scatter(t_traj[-1, 0], t_traj[-1, 1],
-                   c='cyan', marker='X', s=150, edgecolors='k', zorder=4,
-                   label='Meta-Trained on PB (Post-Adaptation)' if i == 0 else "") # Label only once
-                   
-        # Plot intermediate points
-        ax.scatter(t_traj[1:-1, 0], t_traj[1:-1, 1],
-                   c='cyan', marker='.', s=30, alpha=0.7, zorder=3)
+    ax.scatter(0, 0, color='k', marker='+', s=100, label='Origin (Pre-Adaptation State)', zorder=5)
 
-
-    ax.set_title('PCA of Conv6 Weights: Domain Adaptation Trajectories', fontsize=16)
+    ax.set_title('PCA of Conv6 Adaptation Vectors from PB to Naturalistic', fontsize=16)
     ax.set_xlabel('Principal Component 1', fontsize=12)
     ax.set_ylabel('Principal Component 2', fontsize=12)
-    ax.legend(fontsize=12)
+    ax.legend()
+    # Set aspect ratio to equal to make directions clear
+    ax.set_aspect('equal', adjustable='box')
+    ax.grid(True)
     
-    output_path = OUTPUT_DIR / 'pca_conv6_domain_adaptation.png'
+    output_path = OUTPUT_DIR / 'pca_conv6_adaptation_vectors.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
     print(f"\nSuccessfully saved plot to {output_path}")
