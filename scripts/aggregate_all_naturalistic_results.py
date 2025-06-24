@@ -14,35 +14,48 @@ SLURM_LOG_DIR = Path('slurm_logs') # Assumes you run this script from the projec
 
 # We need to replicate the SLURM array logic to find the correct log files
 ARCHITECTURES = ["conv2lr", "conv4lr", "conv6lr"]
-ALL_SEEDS = [42, 123, 555, 789, 999, 111, 222, 333]
+ALL_SEEDS = [42, 123, 555, 789, 999, 111, 222, 333] # <-- UPDATED to all 8 seeds
 NEW_SEEDS = [111, 222, 333]
 
 def find_meta_slurm_output_file(arch, seed):
     """
-    Finds the SLURM output file by checking all known naming patterns.
+    Finds the SLURM output file for a given meta-learning run
+    by checking all known job name patterns for the corresponding task ID.
     """
     if not SLURM_LOG_DIR.exists():
         return None
     
-    # List of all possible search patterns for meta-learning logs
-    # This is more robust than trying to calculate the task ID.
-    patterns = [
-        f"meta_nat_exp_add_seeds_*{seed}*_{arch}*.out",
-        f"meta_nat_exp_add_seeds_*{arch}*_{seed}*.out",
-        f"meta_nat_more_seeds_*{seed}*_{arch}*.out",
-        f"meta_nat_more_seeds_*{arch}*_{seed}*.out",
-        f"meta_nat_exp_*{seed}*_{arch}*.out",
-        f"meta_nat_exp_*{arch}*_{seed}*.out"
+    task_id = -1
+    try:
+        arch_index = ARCHITECTURES.index(arch)
+        if seed in NEW_SEEDS:
+            seed_index = NEW_SEEDS.index(seed)
+            task_id = seed_index * len(ARCHITECTURES) + arch_index
+        else:
+            original_seeds = [s for s in ALL_SEEDS if s not in NEW_SEEDS]
+            seed_index = original_seeds.index(seed)
+            task_id = seed_index * len(ARCHITECTURES) + arch_index
+    except ValueError:
+        return None # Seed/arch not in our lists
+
+    # Search all known patterns for the calculated task_id
+    search_patterns = [
+        f"meta_nat_more_seeds_*_{task_id}.out",
+        f"meta_nat_exp_add_seeds_*_{task_id}.out",
+        f"meta_nat_exp_*_{task_id}.out"
     ]
     
-    for pattern in patterns:
-        found_files = list(SLURM_LOG_DIR.glob(pattern))
-        if found_files:
-            found_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-            # print(f"DEBUG: Found {found_files[0].name} for {arch}/{seed}")
-            return found_files[0]
-            
-    return None
+    found_files = []
+    for pattern in search_patterns:
+        found_files.extend(SLURM_LOG_DIR.glob(pattern))
+    
+    if not found_files:
+        return None
+    
+    if len(found_files) > 1:
+        found_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        
+    return found_files[0]
 
 
 def scrape_accuracy_from_log(log_file, experiment_type='vanilla'):
@@ -197,36 +210,28 @@ def plot_results(vanilla_data, meta_data):
     df = pd.DataFrame(plot_data)
 
     plt.style.use('seaborn-v0_8-whitegrid')
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(10, 7))
     
-    bar_width = 0.35
-    index = np.arange(len(ARCHITECTURES))
+    sns.barplot(data=df, x='Architecture', y='Mean Accuracy', hue='Training Type', ax=ax, palette=['#1f77b4', '#ff7f0e'])
     
-    # --- ROBUST PLOTTING LOGIC ---
-    vanilla_series = df[df['Training Type'] == 'Vanilla'].set_index('Architecture')
-    meta_series = df[df['Training Type'] == 'Meta-Trained'].set_index('Architecture')
+    # Add error bars robustly
+    num_hues = len(df['Training Type'].unique())
+    num_x_cats = len(df['Architecture'].unique())
+    
+    x_coords = [bar.get_x() + bar.get_width() / 2 for bar in ax.patches]
+    y_coords = [bar.get_height() for bar in ax.patches]
 
-    # Reindex to ensure they align with the full list of architectures, filling missing with NaN
-    vanilla_means = vanilla_series['Mean Accuracy'].reindex(ARCHITECTURES, fill_value=0)
-    vanilla_std = vanilla_series['Std Dev'].reindex(ARCHITECTURES, fill_value=0)
+    # Reshape std_devs to match the bar order
+    std_devs_reshaped = df.pivot(index='Architecture', columns='Training Type', values='Std Dev').reindex(ax.get_xticklabels()).T.values.flatten()
     
-    meta_means = meta_series['Mean Accuracy'].reindex(ARCHITECTURES, fill_value=0)
-    meta_std = meta_series['Std Dev'].reindex(ARCHITECTURES, fill_value=0)
-    
-    # Plot bars
-    ax.bar(index - bar_width/2, vanilla_means, bar_width, yerr=vanilla_std,
-           capsize=5, label='Vanilla', color='#1f77b4')
-    ax.bar(index + bar_width/2, meta_means, bar_width, yerr=meta_std,
-           capsize=5, label='Meta-Trained', color='#ff7f0e')
+    ax.errorbar(x=x_coords, y=y_coords, yerr=std_devs_reshaped,
+                fmt='none', capsize=5, color='black', elinewidth=1.5)
 
     ax.set_title('Comparison of Vanilla vs. Meta-Trained Models on Naturalistic Data', fontsize=16)
     ax.set_ylabel('Mean Accuracy', fontsize=12)
     ax.set_xlabel('Model Architecture', fontsize=12)
-    ax.set_xticks(index)
-    ax.set_xticklabels([arch.upper() for arch in ARCHITECTURES])
-    ax.set_ylim(bottom=0.5)
+    ax.set_ylim(bottom=0.5) # Start y-axis at 0.5 for better visibility
     ax.legend(title='Training Type')
-    ax.grid(axis='x') # Remove vertical grid lines for clarity
     
     output_dir = Path('visualizations')
     output_dir.mkdir(exist_ok=True)
