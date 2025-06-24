@@ -99,6 +99,10 @@ def adapt_model_and_flatten(model_path, support_images, support_labels):
     original_model.load_state_dict(state_dict)
     original_model.to(device)
     
+    # --- DEBUGGING: Check weights before adaptation ---
+    print(f"\nAdapting model from {model_path.name}...")
+    weight_before = adapted_model.classifier.weight.detach().clone()
+    
     # Adapt the model
     adapted_model = copy.deepcopy(original_model)
     adapted_model.train()
@@ -108,13 +112,25 @@ def adapt_model_and_flatten(model_path, support_images, support_labels):
     # Move the single support set to device
     support_images, support_labels = support_images.to(device), support_labels.to(device)
 
-    for _ in range(ADAPTATION_STEPS):
+    for i in range(ADAPTATION_STEPS):
         optimizer.zero_grad()
         logits = adapted_model(support_images)
         loss = loss_fn(logits, support_labels)
+        
+        # --- DEBUGGING: Print loss ---
+        print(f"  Adaptation step {i+1}/{ADAPTATION_STEPS}, Loss: {loss.item():.6f}")
+
         loss.backward()
         optimizer.step()
             
+    # --- DEBUGGING: Check weights after adaptation ---
+    weight_after = adapted_model.classifier.weight.detach().clone()
+    weights_are_same = torch.equal(weight_before, weight_after)
+    if weights_are_same:
+        print("  ❌ DEBUG: Weights did NOT change after adaptation.")
+    else:
+        print("  ✅ DEBUG: Weights successfully changed after adaptation.")
+
     # Return flattened weights of the adapted model
     adapted_model.cpu()
     return torch.cat([p.detach().clone().flatten() for p in adapted_model.parameters()]).numpy()
