@@ -90,7 +90,7 @@ def adapt_model_and_flatten(model_path, support_images, support_labels):
     """Loads a model, adapts it on a given support set, and returns the new flattened weights."""
     if not model_path.exists(): return None
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu") # <--- FORCED CPU USAGE
     
     # Load the original model
     original_model = MODEL_CLASS()
