@@ -7,57 +7,96 @@ import numpy as np
 
 # --- Configuration ---
 VANILLA_LOG_DIR = Path('logs_naturalistic_vanilla')
-META_LOG_DIR = Path('logs_naturalistic_meta') # As found in the SLURM script
-SLURM_LOG_DIR = Path('slurm_logs') # Assuming this is where the .out files are
+META_LOG_DIR = Path('logs_naturalistic_meta')
+SLURM_LOG_DIR = Path('slurm_logs') # Assumes you run this script from the project root on Della
 
-def find_slurm_output_file(job_id_str):
-    """Finds the SLURM output file based on a job ID string like 'slurm-654321'."""
+# We need to replicate the SLURM array logic to find the correct log files
+ARCHITECTURES = ["conv2lr", "conv4lr", "conv6lr"]
+SEEDS = [123, 42, 555, 789, 999] # Assuming the full 5 seeds were run for the final experiment
+
+def find_meta_slurm_output_file(arch, seed):
+    """
+    Finds the SLURM output file for a given meta-learning run
+    by replicating the SLURM array task ID logic.
+    """
     if not SLURM_LOG_DIR.exists():
+        print(f"Warning: SLURM log directory not found at {SLURM_LOG_DIR}")
         return None
     
-    # Simple search for now, can be made more robust if needed
-    for f in SLURM_LOG_DIR.glob(f"*{job_id_str}*.out"):
-        return f
-    return None
+    try:
+        arch_index = ARCHITECTURES.index(arch)
+        seed_index = SEEDS.index(seed)
+    except ValueError as e:
+        print(f"Warning: Could not find arch/seed in predefined list: {e}")
+        return None
+
+    num_archs = len(ARCHITECTURES)
+    task_id = seed_index * num_archs + arch_index
+    
+    # Search for the file pattern, e.g., meta_nat_exp_add_seeds_*_5.out
+    search_pattern = f"meta_nat_exp_add_seeds_*_{task_id}.out"
+    
+    found_files = list(SLURM_LOG_DIR.glob(search_pattern))
+    
+    if not found_files:
+        # Fallback for the other slurm script name
+        search_pattern = f"meta_nat_exp_*_{task_id}.out"
+        found_files = list(SLURM_LOG_DIR.glob(search_pattern))
+
+    if not found_files:
+        # print(f"Debug: No file found for pattern {search_pattern}")
+        return None
+    
+    if len(found_files) > 1:
+        print(f"Warning: Found multiple log files for task {task_id}. Using the most recent one.")
+        # Sort by modification time, newest first
+        found_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        
+    return found_files[0]
+
 
 def scrape_accuracy_from_log(log_file):
     """
     Scrapes the last 'Val Acc' value from a SLURM output file.
-    This is a fallback for when JSON is missing.
     """
     if not log_file or not log_file.exists():
         return None
     
     last_val_acc = None
-    # Regex to find lines like "Val Acc: 0.5418"
-    acc_regex = re.compile(r"Val Acc:\s*([0-9\.]+)")
+    # Regex to find lines like "Val Acc: 0.5418" or "val_acc: 0.5418"
+    acc_regex = re.compile(r"val acc:\s*([0-9\.]+)", re.IGNORECASE)
     
-    with open(log_file, 'r') as f:
+    with open(log_file, 'r', errors='ignore') as f:
         for line in f:
             match = acc_regex.search(line)
             if match:
-                last_val_acc = float(match.group(1))
+                try:
+                    last_val_acc = float(match.group(1))
+                except ValueError:
+                    continue # Ignore if conversion fails
     
     return last_val_acc
 
-def parse_results(base_dir, slurm_job_name_pattern):
+def parse_results(base_dir, experiment_type='vanilla'):
     """
-    Parses results from a base directory, checking for JSON first,
-    then falling back to scraping SLURM logs.
+    Parses results, falling back to specific SLURM log scraping for meta runs.
     """
     results = {}
     if not base_dir.exists():
         print(f"Warning: Directory not found: {base_dir}")
         return results
 
-    architectures = [d.name for d in base_dir.iterdir() if d.is_dir()]
-    
-    for arch in architectures:
+    for arch in ARCHITECTURES:
         arch_dir = base_dir / arch
+        if not arch_dir.exists():
+            continue
+            
         accuracies = []
-        
-        seed_dirs = [d for d in arch_dir.iterdir() if d.is_dir() and d.name.startswith('seed_')]
-        for seed_dir in seed_dirs:
+        for seed in SEEDS:
+            seed_dir = arch_dir / f"seed_{seed}"
+            if not seed_dir.exists():
+                continue
+
             accuracy = None
             metrics_file = seed_dir / 'training_metrics.json'
             
@@ -74,29 +113,22 @@ def parse_results(base_dir, slurm_job_name_pattern):
 
             # --- Strategy 2: Fallback to scraping SLURM .out file ---
             if accuracy is None:
-                # This part is a placeholder - finding the exact .out file requires more info.
-                # For now, we'll assume a naming convention or that you'll add it.
-                # Let's try to find a job_id file if it exists
-                job_id_file = seed_dir / 'slurm_job_id.txt'
-                if job_id_file.exists():
-                     with open(job_id_file, 'r') as f:
-                         job_id = f.read().strip()
-                         slurm_file = find_slurm_output_file(job_id)
-                         if slurm_file:
-                             scraped_acc = scrape_accuracy_from_log(slurm_file)
-                             if scraped_acc:
-                                 accuracy = scraped_acc
+                log_file = None
+                if experiment_type == 'meta':
+                    log_file = find_meta_slurm_output_file(arch, seed)
+                
+                if log_file:
+                    scraped_acc = scrape_accuracy_from_log(log_file)
+                    if scraped_acc is not None:
+                        accuracy = scraped_acc
+                    else:
+                        print(f"Warning: Found log {log_file.name} but could not scrape Val Acc.")
                 else:
-                    # Generic fallback if no job id is logged
-                    # NOTE: This part is highly dependent on your SLURM output naming scheme
-                    # You may need to manually find the right .out files if this fails.
-                    print(f"Warning: No JSON and no job_id file for {seed_dir}. Cannot scrape SLURM log.")
-
+                    if experiment_type == 'meta':
+                         print(f"Warning: No JSON and could not find SLURM log for meta run {arch}/seed_{seed}")
 
             if accuracy is not None:
                 accuracies.append(accuracy)
-            else:
-                print(f"Warning: Could not find any result for {seed_dir}")
         
         if accuracies:
             results[arch] = {
@@ -121,13 +153,16 @@ def print_summary(title, results_data):
             'Architecture': arch,
             'Mean Accuracy': f"{data['mean_accuracy']:.4f}",
             'Std Dev': f"{data['std_accuracy']:.4f}",
-            'Successful Seeds': f"{data['num_seeds_successful']}",
+            'Successful Seeds': f"{data['num_seeds_successful']}/{len(SEEDS)}",
             'Raw Accuracies': ", ".join([f"{acc:.4f}" for acc in data['accuracies']])
         })
     
     df = pd.DataFrame(summary_list)
-    df.set_index('Architecture', inplace=True)
-    print(df.to_string())
+    if not df.empty:
+        df.set_index('Architecture', inplace=True)
+        print(df.to_string())
+    else:
+        print("No successful runs found to summarize.")
 
 
 def main():
@@ -135,9 +170,10 @@ def main():
     print("--- Aggregating All Naturalistic Experiment Results ---")
     print(f"Searching for vanilla results in: {VANILLA_LOG_DIR}")
     print(f"Searching for meta results in:    {META_LOG_DIR}")
+    print(f"Searching for SLURM logs in:    {SLURM_LOG_DIR}")
     
-    vanilla_results = parse_results(VANILLA_LOG_DIR, "vanilla_nat_exp")
-    meta_results = parse_results(META_LOG_DIR, "meta_nat_exp")
+    vanilla_results = parse_results(VANILLA_LOG_DIR, experiment_type='vanilla')
+    meta_results = parse_results(META_LOG_DIR, experiment_type='meta')
     
     print_summary("Vanilla Model Results (Validation Accuracy)", vanilla_results)
     print_summary("Meta-Trained Model Results (Validation Accuracy)", meta_results)
