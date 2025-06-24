@@ -4,6 +4,8 @@ import json
 import pandas as pd
 from pathlib import Path
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 # --- Configuration ---
 VANILLA_LOG_DIR = Path('logs_naturalistic_vanilla')
@@ -12,7 +14,8 @@ SLURM_LOG_DIR = Path('slurm_logs') # Assumes you run this script from the projec
 
 # We need to replicate the SLURM array logic to find the correct log files
 ARCHITECTURES = ["conv2lr", "conv4lr", "conv6lr"]
-SEEDS = [123, 42, 555, 789, 999] # Assuming the full 5 seeds were run for the final experiment
+ALL_SEEDS = [42, 123, 555, 789, 999, 111, 222, 333] # <-- UPDATED to all 8 seeds
+NEW_SEEDS = [111, 222, 333]
 
 def find_meta_slurm_output_file(arch, seed):
     """
@@ -25,7 +28,17 @@ def find_meta_slurm_output_file(arch, seed):
     
     try:
         arch_index = ARCHITECTURES.index(arch)
-        seed_index = SEEDS.index(seed)
+        # Determine which seed list and slurm script pattern to use
+        if seed in NEW_SEEDS:
+            seed_index = NEW_SEEDS.index(seed)
+            search_pattern = f"meta_nat_more_seeds_*_{seed_index * len(ARCHITECTURES) + arch_index}.out"
+        else:
+            # Logic for original seeds might be different, adjust if needed
+            # Assuming original seeds are in the main SEEDS list for this example
+            original_seeds = [s for s in ALL_SEEDS if s not in NEW_SEEDS]
+            seed_index = original_seeds.index(seed)
+            search_pattern = f"meta_nat_exp_*_{seed_index * len(ARCHITECTURES) + arch_index}.out"
+
     except ValueError as e:
         print(f"Warning: Could not find arch/seed in predefined list: {e}")
         return None
@@ -33,14 +46,15 @@ def find_meta_slurm_output_file(arch, seed):
     num_archs = len(ARCHITECTURES)
     task_id = seed_index * num_archs + arch_index
     
-    # Search for the file pattern, e.g., meta_nat_exp_add_seeds_*_5.out
-    search_pattern = f"meta_nat_exp_add_seeds_*_{task_id}.out"
-    
     found_files = list(SLURM_LOG_DIR.glob(search_pattern))
     
     if not found_files:
-        # Fallback for the other slurm script name
-        search_pattern = f"meta_nat_exp_*_{task_id}.out"
+        # Fallback search patterns
+        if seed in NEW_SEEDS:
+            # Fallback for the new seeds script name if the array logic was complex
+            search_pattern = f"meta_nat_more_seeds_*{task_id}.out" # Generic task_id search
+        else:
+            search_pattern = f"meta_nat_exp_add_seeds_*_{task_id}.out"
         found_files = list(SLURM_LOG_DIR.glob(search_pattern))
 
     if not found_files:
@@ -99,7 +113,11 @@ def parse_results(base_dir, experiment_type='vanilla'):
             continue
             
         accuracies = []
-        for seed in SEEDS:
+        for seed in ALL_SEEDS:
+            # Vanilla runs only used the original 5 seeds
+            if experiment_type == 'vanilla' and seed in NEW_SEEDS:
+                continue
+
             seed_dir = arch_dir / f"seed_{seed}"
             if not seed_dir.exists():
                 continue
@@ -160,7 +178,7 @@ def print_summary(title, results_data, experiment_type):
             'Architecture': arch,
             'Mean Accuracy': f"{data['mean_accuracy']:.4f}",
             'Std Dev': f"{data['std_accuracy']:.4f}",
-            'Successful Seeds': f"{data['num_seeds_successful']}/{len(SEEDS)}",
+            'Successful Seeds': f"{data['num_seeds_successful']}/{len(ALL_SEEDS)}",
             'Raw Accuracies': ", ".join([f"{acc:.4f}" for acc in data['accuracies']])
         })
     
@@ -176,6 +194,65 @@ def print_summary(title, results_data, experiment_type):
     else:
         print("No successful runs found to summarize.")
 
+def plot_results(vanilla_data, meta_data):
+    """Generates and saves a bar chart comparing vanilla and meta results."""
+    
+    plot_data = []
+    for arch in ARCHITECTURES:
+        if arch in vanilla_data:
+            plot_data.append({
+                'Architecture': arch.upper(),
+                'Training Type': 'Vanilla',
+                'Mean Accuracy': vanilla_data[arch]['mean_accuracy'],
+                'Std Dev': vanilla_data[arch]['std_accuracy']
+            })
+        if arch in meta_data:
+            plot_data.append({
+                'Architecture': arch.upper(),
+                'Training Type': 'Meta-Trained',
+                'Mean Accuracy': meta_data[arch]['mean_accuracy'],
+                'Std Dev': meta_data[arch]['std_accuracy']
+            })
+
+    if not plot_data:
+        print("\nNo data to plot.")
+        return
+        
+    df = pd.DataFrame(plot_data)
+
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, ax = plt.subplots(figsize=(10, 7))
+    
+    sns.barplot(data=df, x='Architecture', y='Mean Accuracy', hue='Training Type', ax=ax, palette=['#1f77b4', '#ff7f0e'])
+    
+    # Add error bars
+    for i, bar in enumerate(ax.patches):
+        # Find the corresponding data point
+        arch = ax.get_xticklabels()[i % len(ARCHITECTURES)].get_text()
+        hue = df['Training Type'].unique()[i // len(ARCHITECTURES)]
+        
+        std_dev = df[(df['Architecture'] == arch) & (df['Training Type'] == hue)]['Std Dev'].values[0]
+        
+        ax.errorbar(x=bar.get_x() + bar.get_width() / 2,
+                    y=bar.get_height(),
+                    yerr=std_dev,
+                    fmt='none',
+                    capsize=5,
+                    color='black')
+
+    ax.set_title('Comparison of Vanilla vs. Meta-Trained Models on Naturalistic Data', fontsize=16)
+    ax.set_ylabel('Mean Accuracy', fontsize=12)
+    ax.set_xlabel('Model Architecture', fontsize=12)
+    ax.set_ylim(bottom=0.5) # Start y-axis at 0.5 for better visibility
+    ax.legend(title='Training Type')
+    
+    output_dir = Path('visualizations')
+    output_dir.mkdir(exist_ok=True)
+    output_path = output_dir / 'naturalistic_vanilla_vs_meta_comparison.png'
+    
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    print(f"\n✅ Successfully saved plot to {output_path}")
 
 def main():
     """Main function to orchestrate the aggregation and printing."""
@@ -189,6 +266,8 @@ def main():
     
     print_summary("Vanilla Model Results", vanilla_results, experiment_type='vanilla')
     print_summary("Meta-Trained Model Results", meta_results, experiment_type='meta')
+    
+    plot_results(vanilla_results, meta_results)
 
 
 if __name__ == '__main__':
