@@ -33,11 +33,11 @@ def find_meta_slurm_output_file(arch, seed):
             seed_index = NEW_SEEDS.index(seed)
             search_pattern = f"meta_nat_more_seeds_*_{seed_index * len(ARCHITECTURES) + arch_index}.out"
         else:
-            # Logic for original seeds might be different, adjust if needed
-            # Assuming original seeds are in the main SEEDS list for this example
+            # Logic for original seeds
             original_seeds = [s for s in ALL_SEEDS if s not in NEW_SEEDS]
             seed_index = original_seeds.index(seed)
-            search_pattern = f"meta_nat_exp_*_{seed_index * len(ARCHITECTURES) + arch_index}.out"
+            # CORRECTED: Use the correct SLURM script name pattern
+            search_pattern = f"meta_nat_exp_add_seeds_*_{seed_index * len(ARCHITECTURES) + arch_index}.out"
 
     except ValueError as e:
         print(f"Warning: Could not find arch/seed in predefined list: {e}")
@@ -225,20 +225,14 @@ def plot_results(vanilla_data, meta_data):
     
     sns.barplot(data=df, x='Architecture', y='Mean Accuracy', hue='Training Type', ax=ax, palette=['#1f77b4', '#ff7f0e'])
     
-    # Add error bars
-    for i, bar in enumerate(ax.patches):
-        # Find the corresponding data point
-        arch = ax.get_xticklabels()[i % len(ARCHITECTURES)].get_text()
-        hue = df['Training Type'].unique()[i // len(ARCHITECTURES)]
-        
-        std_dev = df[(df['Architecture'] == arch) & (df['Training Type'] == hue)]['Std Dev'].values[0]
-        
-        ax.errorbar(x=bar.get_x() + bar.get_width() / 2,
-                    y=bar.get_height(),
-                    yerr=std_dev,
-                    fmt='none',
-                    capsize=5,
-                    color='black')
+    # --- CORRECTED & SIMPLIFIED Error Bar Logic ---
+    # This logic is more robust and avoids the IndexError
+    x_coords = [p.get_x() + 0.5 * p.get_width() for p in ax.patches]
+    y_coords = [p.get_height() for p in ax.patches]
+    # The order of patches in `ax.patches` matches the order of rows in the DataFrame
+    errors = df['Std Dev']
+    
+    ax.errorbar(x=x_coords, y=y_coords, yerr=errors, fmt='none', capsize=5, color='black')
 
     ax.set_title('Comparison of Vanilla vs. Meta-Trained Models on Naturalistic Data', fontsize=16)
     ax.set_ylabel('Mean Accuracy', fontsize=12)
