@@ -55,27 +55,34 @@ def find_meta_slurm_output_file(arch, seed):
     return found_files[0]
 
 
-def scrape_accuracy_from_log(log_file):
+def scrape_accuracy_from_log(log_file, experiment_type='vanilla'):
     """
-    Scrapes the last 'Val Acc' value from a SLURM output file.
+    Scrapes the last accuracy value from a SLURM output file.
+    - For 'vanilla' runs, it looks for the last 'Val Acc:'.
+    - For 'meta' runs, it looks for the final 'Test Results: ... Avg Acc:'.
     """
     if not log_file or not log_file.exists():
         return None
     
-    last_val_acc = None
-    # Regex to find lines like "Val Acc: 0.5418" or "val_acc: 0.5418"
-    acc_regex = re.compile(r"val acc:\s*([0-9\.]+)", re.IGNORECASE)
+    last_acc = None
+    
+    if experiment_type == 'meta':
+        # "Test Results: Avg Loss: 0.3142, Avg Acc: 0.928 across 3600 episodes."
+        acc_regex = re.compile(r"Test Results:.*Avg Acc:\s*([0-9\.]+)")
+    else: # Default to vanilla
+        # "Val Acc: 0.5418" or "val_acc: 0.5418"
+        acc_regex = re.compile(r"val acc:\s*([0-9\.]+)", re.IGNORECASE)
     
     with open(log_file, 'r', errors='ignore') as f:
         for line in f:
             match = acc_regex.search(line)
             if match:
                 try:
-                    last_val_acc = float(match.group(1))
+                    last_acc = float(match.group(1))
                 except ValueError:
                     continue # Ignore if conversion fails
     
-    return last_val_acc
+    return last_acc
 
 def parse_results(base_dir, experiment_type='vanilla'):
     """
@@ -118,11 +125,11 @@ def parse_results(base_dir, experiment_type='vanilla'):
                     log_file = find_meta_slurm_output_file(arch, seed)
                 
                 if log_file:
-                    scraped_acc = scrape_accuracy_from_log(log_file)
+                    scraped_acc = scrape_accuracy_from_log(log_file, experiment_type=experiment_type)
                     if scraped_acc is not None:
                         accuracy = scraped_acc
                     else:
-                        print(f"Warning: Found log {log_file.name} but could not scrape Val Acc.")
+                        print(f"Warning: Found log {log_file.name} but could not scrape accuracy.")
                 else:
                     if experiment_type == 'meta':
                          print(f"Warning: No JSON and could not find SLURM log for meta run {arch}/seed_{seed}")
@@ -140,7 +147,7 @@ def parse_results(base_dir, experiment_type='vanilla'):
             
     return results
 
-def print_summary(title, results_data):
+def print_summary(title, results_data, experiment_type):
     """Prints a formatted summary of the results."""
     print(f"\n--- {title} ---")
     if not results_data:
@@ -160,6 +167,11 @@ def print_summary(title, results_data):
     df = pd.DataFrame(summary_list)
     if not df.empty:
         df.set_index('Architecture', inplace=True)
+        # Add a note about the accuracy type
+        if experiment_type == 'meta':
+            print("NOTE: Accuracies are final TEST set results from meta-training runs.")
+        else:
+            print("NOTE: Accuracies are best VALIDATION set results from vanilla training runs.")
         print(df.to_string())
     else:
         print("No successful runs found to summarize.")
@@ -175,8 +187,8 @@ def main():
     vanilla_results = parse_results(VANILLA_LOG_DIR, experiment_type='vanilla')
     meta_results = parse_results(META_LOG_DIR, experiment_type='meta')
     
-    print_summary("Vanilla Model Results (Validation Accuracy)", vanilla_results)
-    print_summary("Meta-Trained Model Results (Validation Accuracy)", meta_results)
+    print_summary("Vanilla Model Results", vanilla_results, experiment_type='vanilla')
+    print_summary("Meta-Trained Model Results", meta_results, experiment_type='meta')
 
 
 if __name__ == '__main__':
