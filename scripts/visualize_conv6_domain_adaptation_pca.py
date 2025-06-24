@@ -87,7 +87,10 @@ def load_and_flatten_weights(model_path):
         return None
 
 def adapt_model_and_flatten(model_path, support_images, support_labels):
-    """Loads a model, adapts it on a given support set, and returns the new flattened weights."""
+    """
+    Loads a model, adapts it on a given support set, and returns a list
+    of flattened weight vectors for each adaptation step.
+    """
     if not model_path.exists(): return None
     
     device = torch.device("cpu") # Force CPU usage
@@ -103,9 +106,8 @@ def adapt_model_and_flatten(model_path, support_images, support_labels):
         print(f"Error loading model {model_path} for adaptation: {e}")
         return None
     
-    # --- DEBUGGING: Check weights before adaptation ---
-    print(f"\nAdapting model from {model_path.name}...")
-    weight_before = adapted_model.classifier.weight.detach().clone()
+    # --- Store trajectory of weights ---
+    weight_trajectory = [torch.cat([p.detach().clone().flatten() for p in adapted_model.parameters()]).numpy().copy()]
     
     optimizer = optim.SGD(adapted_model.parameters(), lr=ADAPTATION_LR)
     loss_fn = nn.CrossEntropyLoss()
@@ -117,24 +119,13 @@ def adapt_model_and_flatten(model_path, support_images, support_labels):
         optimizer.zero_grad()
         logits = adapted_model(support_images)
         loss = loss_fn(logits, support_labels)
-        
-        # --- DEBUGGING: Print loss ---
-        print(f"  Adaptation step {i+1}/{ADAPTATION_STEPS}, Loss: {loss.item():.6f}")
-
         loss.backward()
         optimizer.step()
+        
+        # Store a TRUE COPY of the weights after each step
+        weight_trajectory.append(torch.cat([p.detach().clone().flatten() for p in adapted_model.parameters()]).numpy().copy())
             
-    # --- DEBUGGING: Check weights after adaptation ---
-    weight_after = adapted_model.classifier.weight.detach().clone()
-    weights_are_same = torch.equal(weight_before, weight_after)
-    if weights_are_same:
-        print("  ❌ DEBUG: Weights did NOT change after adaptation.")
-    else:
-        print("  ✅ DEBUG: Weights successfully changed after adaptation.")
-
-    # Return flattened weights of the adapted model
-    adapted_model.cpu()
-    return torch.cat([p.detach().clone().flatten() for p in adapted_model.parameters()]).numpy()
+    return weight_trajectory
 
 # --- Main Execution ---
 def main():
@@ -154,7 +145,8 @@ def main():
     first_episode_support_images, first_episode_support_labels = support_dataset[0]
     print(f"Using support set from episode '{support_dataset.episode_keys[0]}' for adaptation ({len(first_episode_support_labels)} samples).")
 
-    weights_collection = {'PB': [], 'Naturalistic': [], 'PB_Adapted': []}
+    weights_collection = {'PB': [], 'Naturalistic': []}
+    trajectories = [] # To store the list of weight vectors for each PB seed's adaptation
     
     # 1. Load Naturalistic meta-trained models
     for seed in NAT_SEEDS:
@@ -162,60 +154,63 @@ def main():
         w = load_and_flatten_weights(path)
         if w is not None: weights_collection['Naturalistic'].append(w)
 
-    # 2. Load PB meta-trained models (pre- and post-adaptation)
+    # 2. Load PB meta-trained models and get adaptation trajectories
     for seed in PB_SEEDS:
-        path = Path(str(PB_PATH_TEMPLATE).format(seed=seed)) # CORRECTED: Convert to string before formatting
+        path = Path(str(PB_PATH_TEMPLATE).format(seed=seed))
         
-        # Pre-adaptation
-        w_pre = load_and_flatten_weights(path)
-        if w_pre is not None: weights_collection['PB'].append(w_pre)
+        # The adaptation function now returns a list of weights (a trajectory)
+        trajectory = adapt_model_and_flatten(path, first_episode_support_images, first_episode_support_labels)
         
-        # Post-adaptation using the single, consistent support set
-        w_post = adapt_model_and_flatten(path, first_episode_support_images, first_episode_support_labels)
-        if w_post is not None: weights_collection['PB_Adapted'].append(w_post)
+        if trajectory:
+            weights_collection['PB'].append(trajectory[0]) # Pre-adaptation state
+            trajectories.append(trajectory) # Full trajectory
         
-    # 3. Perform PCA on all collected weights
-    all_weights = sum(weights_collection.values(), [])
-    labels = [k for k, v_list in weights_collection.items() for _ in v_list]
+    # 3. Perform PCA on the start and end points only
+    # The end points are the last element of each trajectory
+    pb_end_points = [t[-1] for t in trajectories]
+    all_stable_weights = weights_collection['PB'] + weights_collection['Naturalistic'] + pb_end_points
     
-    if len(all_weights) < 2:
+    if len(all_stable_weights) < 2:
         print("Not enough weights loaded to perform PCA. Exiting.")
         return
         
-    weights_matrix = np.array(all_weights)
+    weights_matrix = np.array(all_stable_weights)
     pca = PCA(n_components=2)
-    transformed_weights = pca.fit_transform(weights_matrix)
+    pca.fit(weights_matrix) # Fit PCA on stable points
     
-    # 4. Plotting
+    # 4. Transform all points (including intermediate ones) using the fitted PCA
+    transformed_trajectories = [pca.transform(np.array(t)) for t in trajectories]
+    transformed_naturalistic = pca.transform(np.array(weights_collection['Naturalistic']))
+    
+    # 5. Plotting
     plt.style.use('seaborn-v0_8-whitegrid')
     fig, ax = plt.subplots(figsize=(12, 10))
     
-    # Create a mapping from flat index to label and original data
-    plot_data = {}
-    start_idx = 0
-    for label, w_list in weights_collection.items():
-        end_idx = start_idx + len(w_list)
-        plot_data[label] = transformed_weights[start_idx:end_idx]
-        start_idx = end_idx
+    # Plot Naturalistic points
+    ax.scatter(transformed_naturalistic[:, 0], transformed_naturalistic[:, 1], 
+               c='red', marker='s', s=200, label='Meta-Trained on Naturalistic', edgecolors='k', zorder=5)
 
-    # Plot points
-    ax.scatter(plot_data['Naturalistic'][:, 0], plot_data['Naturalistic'][:, 1], 
-               c='red', marker='s', s=150, label='Meta-Trained on Naturalistic', edgecolors='k', zorder=3)
-    ax.scatter(plot_data['PB'][:, 0], plot_data['PB'][:, 1],
-               c='blue', marker='o', s=150, label='Meta-Trained on PB (Pre-Adaptation)', edgecolors='k', zorder=3)
-    ax.scatter(plot_data['PB_Adapted'][:, 0], plot_data['PB_Adapted'][:, 1],
-               c='cyan', marker='X', s=150, label='Meta-Trained on PB (Post-Adaptation)', edgecolors='k', zorder=3)
-               
-    # Draw arrows
-    for i in range(len(plot_data['PB'])):
-        start_point = plot_data['PB'][i]
-        end_point = plot_data['PB_Adapted'][i]
-        ax.arrow(start_point[0], start_point[1], 
-                 end_point[0] - start_point[0], end_point[1] - start_point[1],
-                 head_width=0.01 * (ax.get_xlim()[1] - ax.get_xlim()[0]), # Scale arrow head
-                 fc='gray', ec='gray', length_includes_head=True, zorder=2, alpha=0.7)
+    # Plot each trajectory
+    for i, t_traj in enumerate(transformed_trajectories):
+        # Plot full line for the trajectory
+        ax.plot(t_traj[:, 0], t_traj[:, 1], color='gray', alpha=0.6, zorder=2)
+        
+        # Plot start point (PB Pre-Adaptation)
+        ax.scatter(t_traj[0, 0], t_traj[0, 1],
+                   c='blue', marker='o', s=150, edgecolors='k', zorder=4,
+                   label='Meta-Trained on PB (Pre-Adaptation)' if i == 0 else "") # Label only once
+                   
+        # Plot end point (PB Post-Adaptation)
+        ax.scatter(t_traj[-1, 0], t_traj[-1, 1],
+                   c='cyan', marker='X', s=150, edgecolors='k', zorder=4,
+                   label='Meta-Trained on PB (Post-Adaptation)' if i == 0 else "") # Label only once
+                   
+        # Plot intermediate points
+        ax.scatter(t_traj[1:-1, 0], t_traj[1:-1, 1],
+                   c='cyan', marker='.', s=30, alpha=0.7, zorder=3)
 
-    ax.set_title('PCA of Conv6 Weights: Domain Adaptation from PB to Naturalistic', fontsize=16)
+
+    ax.set_title('PCA of Conv6 Weights: Domain Adaptation Trajectories', fontsize=16)
     ax.set_xlabel('Principal Component 1', fontsize=12)
     ax.set_ylabel('Principal Component 2', fontsize=12)
     ax.legend(fontsize=12)
