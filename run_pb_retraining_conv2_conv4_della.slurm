@@ -50,6 +50,8 @@ python -m meta_baseline.train_and_test_meta_baselines \
     --support_size 4 6 8 10 \
     --test_support_size 10 \
     --adaptation_steps 5 \
-    --test_adaptation_steps 15
+    --test_adaptation_steps 15 \
+    --patience 30 \
+    --min_delta 0.005
 
 echo "Job finished with exit code $? at $(date)" 
