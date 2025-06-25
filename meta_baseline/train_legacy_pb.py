@@ -1,4 +1,14 @@
 import os
+import sys
+
+# --- FIX FOR MODULE NOT FOUND ERROR ---
+# Add the local learn2learn repository to the Python path
+# This is a workaround for a broken environment where pip install fails.
+L2L_PATH = '/Users/maxgupta/Desktop/Desktop - Mac/Princeton/CoCoSci_lab/sae-stuff/ManyPaths/learn2learn_repo'
+if L2L_PATH not in sys.path:
+    sys.path.append(L2L_PATH)
+# --- END FIX ---
+
 import torch
 import torch.nn.functional as F
 import json
@@ -9,7 +19,6 @@ import argparse
 import copy
 import gc
 from pathlib import Path
-import sys
 import learn2learn as l2l
 import torch.nn as nn
 

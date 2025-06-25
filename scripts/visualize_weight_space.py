@@ -184,7 +184,7 @@ def main(args):
 
                 except Exception as e:
                     print(f"    ERROR processing {exp_type}-{model_arch}-seed{seed}: {e}")
-
+        
     # --- Overall PCA Section (on all models) ---
     def pad_and_stack_models(weights_list):
         if not weights_list: return None
@@ -196,7 +196,7 @@ def main(args):
         print(f"\n--- Running PCA on {weights_matrix_pca.shape[0]} total models ---")
         pca = PCA(n_components=2, random_state=42)
         results_pca = pca.fit_transform(weights_matrix_pca)
-        
+    
         plot_pca_results(results_pca, all_labels_for_pca, args.output_dir / "weights_pca_all_models.png", "PCA Projection of All Model Weights")
 
 if __name__ == "__main__":

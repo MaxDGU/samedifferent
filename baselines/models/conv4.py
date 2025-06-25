@@ -56,6 +56,12 @@ class SameDifferentCNN(nn.Module):
         self._initialize_weights()
     
     def _initialize_size(self):
+        # Temporarily set batchnorm layers to eval mode
+        self.bn1.eval()
+        self.bn2.eval()
+        self.bn3.eval()
+        self.bn4.eval()
+
         x = torch.randn(1, 3, 128, 128)
         x = self.pool(F.relu(self.bn1(self.conv1(x))))
         x = self.pool(F.relu(self.bn2(self.conv2(x))))
@@ -63,6 +69,12 @@ class SameDifferentCNN(nn.Module):
         x = self.pool(F.relu(self.bn4(self.conv4(x))))
         x = x.reshape(x.size(0), -1)
         self._to_linear = x.size(1)
+
+        # Set batchnorm layers back to train mode
+        self.bn1.train()
+        self.bn2.train()
+        self.bn3.train()
+        self.bn4.train()
     
     def _initialize_weights(self):
         # Initialize convolutional layers

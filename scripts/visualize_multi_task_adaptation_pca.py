@@ -8,6 +8,15 @@ from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import importlib
+import torch.nn.functional as F
+
+# --- Custom Dataset Import ---
+# This is a bit of a hack to ensure we can import from the parent `naturalistic` dir
+try:
+    from naturalistic.train_vanilla import NaturalisticDataset
+except ImportError:
+    print("Warning: Could not import NaturalisticDataset. A dummy class will be used.", file=sys.stderr)
+    class NaturalisticDataset: pass # Dummy class to avoid crashing
 
 # --- Setup Project Path ---
 project_root = Path(__file__).resolve().parent.parent
@@ -61,6 +70,11 @@ def main():
     parser.add_argument('--naturalistic_vanilla_dir', type=str, default="logs_naturalistic_vanilla", help="Directory for naturalistic Vanilla models.")
     parser.add_argument('--pb_dir', type=str, default="results/pb_retrained_legacy_conv6", help="Directory for the correctly retrained PB MAML models.")
     
+    # New arguments for adaptation
+    parser.add_argument('--naturalistic_data_dir', type=str, default="data/naturalistic_new/meta", help="Directory for the naturalistic dataset for adaptation.")
+    parser.add_argument('--adaptation_lr', type=float, default=0.01, help="Learning rate for the adaptation process.")
+    parser.add_argument('--adaptation_steps', type=int, default=5, help="Number of gradient steps for adaptation.")
+
     parser.add_argument('--output_dir', type=str, default="visualizations/final_pca", help="Directory to save the final PCA plot.")
     args = parser.parse_args()
 
@@ -68,11 +82,22 @@ def main():
     model_class = import_legacy_model_class(args.architecture)
     arch_name_lr = args.architecture + 'lr'
 
+    # --- Load adaptation data once ---
+    print(f"--- Loading Naturalistic data for adaptation from {args.naturalistic_data_dir} ---")
+    try:
+        adaptation_dataset = NaturalisticDataset(args.naturalistic_data_dir, num_tasks=10, num_examples=50) # Small subset for speed
+        adaptation_loader = torch.utils.data.DataLoader(adaptation_dataset, batch_size=32, shuffle=True)
+        adaptation_batch = next(iter(adaptation_loader))
+        print("Adaptation data loaded successfully.")
+    except Exception as e:
+        print(f"CRITICAL: Could not load adaptation data. The new analysis will be skipped. Error: {e}")
+        adaptation_batch = None
+
     all_weights = []
     all_labels = []
 
     # --- Load All Weights (they all use the same legacy architecture now) ---
-    print("--- Loading All Model Weights (using Legacy Architecture) ---")
+    print("\n--- Loading All Model Weights (using Legacy Architecture) ---")
     for seed in args.seeds:
         print(f"\n- Seed {seed}:")
         set_seed(seed)
@@ -97,13 +122,38 @@ def main():
         else:
             print(f"  Vanilla (Nat) final weights not found in: {vanilla_seed_dir}")
             
-        # 3. MAML (PB)
+        # 3. MAML (PB) and On-The-Fly Adaptation
         pb_seed_dir = Path(args.pb_dir) / args.architecture / f"seed_{seed}"
         final_pb_path = find_weight_file(pb_seed_dir, ["best_model.pt"])
         if final_pb_path:
-            all_weights.extend([initial_weights, load_weights_from_path(final_pb_path, model_class, device)])
+            # Load the base PB-trained model
+            pb_model = model_class().to(device)
+            pb_model.load_state_dict(torch.load(final_pb_path, map_location=device).get('model_state_dict'), strict=False)
+            
+            all_weights.extend([initial_weights, get_model_weights(pb_model)])
             all_labels.extend(["MAML (PB) Initial", "MAML (PB) Final"])
             print(f"  Loaded MAML (PB) initial (re-created) and final from {final_pb_path}")
+
+            # Perform adaptation if data is available
+            if adaptation_batch:
+                print("    -> Adapting MAML (PB) on Naturalistic data...")
+                learner = pb_model.clone()
+                optimizer = torch.optim.SGD(learner.parameters(), lr=args.adaptation_lr)
+                
+                images, labels = adaptation_batch
+                images, labels = images.to(device), labels.to(device).float()
+
+                for step in range(args.adaptation_steps):
+                    optimizer.zero_grad()
+                    preds = learner(images)
+                    loss = F.binary_cross_entropy_with_logits(preds.squeeze(), labels)
+                    loss.backward()
+                    optimizer.step()
+                
+                all_weights.append(get_model_weights(learner))
+                all_labels.append("MAML (PB->Nat) Adapted")
+                print(f"    -> Adaptation complete. Final loss: {loss.item():.4f}")
+
         else:
             print(f"  MAML (PB) final weights not found in: {pb_seed_dir}")
 
@@ -121,6 +171,7 @@ def main():
     styles = {
         "MAML (PB) Initial": {"marker": "x", "color": "#ff7f0e", "label": "MAML (PB) Initial"},
         "MAML (PB) Final": {"marker": "P", "color": "#ff7f0e", "label": "MAML (PB) Final"},
+        "MAML (PB->Nat) Adapted": {"marker": "*", "color": "#ff7f0e", "label": "MAML (PB->Nat) Adapted"},
         "MAML (Nat) Initial": {"marker": "x", "color": "#1f77b4", "label": "MAML (Nat) Initial"},
         "MAML (Nat) Final": {"marker": "o", "color": "#1f77b4", "label": "MAML (Nat) Final"},
         "Vanilla (Nat) Initial": {"marker": "x", "color": "#1f77b4", "label": "Vanilla (Nat) Initial"},
