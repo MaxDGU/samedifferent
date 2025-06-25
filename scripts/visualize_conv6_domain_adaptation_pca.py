@@ -23,7 +23,7 @@ from meta_baseline.models.conv6lr import SameDifferentCNN as Conv6lrCNN
 
 # --- Configuration ---
 PB_SEEDS = [789, 999, 42, 555, 123]
-NAT_SEEDS = [999, 555]
+NAT_SEEDS = [999, 555, 111, 222, 333]
 MODEL_CLASS = Conv6lrCNN
 
 # Paths - using Path objects for robustness
@@ -171,10 +171,10 @@ def main():
         return
         
     weights_matrix = np.array(all_weights)
-    pca = PCA(n_components=2)
-    transformed_weights = pca.fit_transform(weights_matrix)
+    pca_clusters = PCA(n_components=2)
+    transformed_weights = pca_clusters.fit_transform(weights_matrix)
     
-    # 4. Plotting
+    # 4. Plotting (Plot 1: Absolute Positions)
     plt.style.use('seaborn-v0_8-whitegrid')
     fig, ax = plt.subplots(figsize=(12, 10))
     
@@ -203,15 +203,51 @@ def main():
                  head_width=0.01 * (ax.get_xlim()[1] - ax.get_xlim()[0]), # Scale arrow head
                  fc='gray', ec='gray', length_includes_head=True, zorder=2, alpha=0.7)
 
-    ax.set_title('PCA of Conv6 Weights: Domain Adaptation from PB to Naturalistic', fontsize=16)
+    ax.set_title('PCA of Absolute Model Weights (Clusters)', fontsize=16)
     ax.set_xlabel('Principal Component 1', fontsize=12)
     ax.set_ylabel('Principal Component 2', fontsize=12)
     ax.legend(fontsize=12)
     
-    output_path = OUTPUT_DIR / 'pca_conv6_domain_adaptation.png'
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    output_path_clusters = OUTPUT_DIR / 'pca_conv6_absolute_positions.png'
+    plt.savefig(output_path_clusters, dpi=300, bbox_inches='tight')
     plt.close(fig)
-    print(f"\nSuccessfully saved plot to {output_path}")
+    print(f"\n✅ Successfully saved cluster plot to {output_path_clusters}")
+    
+    # --- PLOT 2: PCA of Adaptation Vectors ---
+    
+    # 5. Calculate and perform PCA on the adaptation vectors themselves
+    pb_pre_weights = np.array(weights_collection['PB_pre'])
+    pb_post_weights = np.array(weights_collection['PB_post'])
+    adaptation_vectors = pb_post_weights - pb_pre_weights
+    
+    pca_vectors = PCA(n_components=2)
+    transformed_vectors = pca_vectors.fit_transform(adaptation_vectors)
+    explained_variance_vectors = pca_vectors.explained_variance_ratio_
+
+    # 6. Plotting the adaptation vectors (Quiver Plot)
+    fig2, ax2 = plt.subplots(figsize=(10, 10))
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+    
+    for i in range(len(transformed_vectors)):
+        ax2.quiver(0, 0,
+                   transformed_vectors[i, 0],
+                   transformed_vectors[i, 1],
+                   angles='xy', scale_units='xy', scale=1,
+                   color=colors[i % len(colors)],
+                   label=f'Seed {PB_SEEDS[i]}')
+
+    ax2.scatter(0, 0, color='k', marker='+', s=100, label='Origin (No Change)', zorder=5)
+    ax2.set_title('PCA of Adaptation Vectors (Direction of Change)', fontsize=16)
+    ax2.set_xlabel(f'Principal Component 1 ({explained_variance_vectors[0]*100:.1f}%)', fontsize=12)
+    ax2.set_ylabel(f'Principal Component 2 ({explained_variance_vectors[1]*100:.1f}%)', fontsize=12)
+    ax2.legend()
+    ax2.set_aspect('equal', adjustable='box')
+    ax2.grid(True)
+    
+    output_path_vectors = OUTPUT_DIR / 'pca_conv6_adaptation_vectors.png'
+    plt.savefig(output_path_vectors, dpi=300, bbox_inches='tight')
+    plt.close(fig2)
+    print(f"✅ Successfully saved vector plot to {output_path_vectors}")
 
 if __name__ == '__main__':
     main()
