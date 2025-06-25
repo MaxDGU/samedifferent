@@ -160,7 +160,7 @@ def main():
                 print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
                 print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
                 
-                if val_acc > best_val_acc:
+                if val_acc > best_val_acc + args.min_delta:
                     best_val_acc = val_acc
                     # Save checkpoint
                     checkpoint = {
