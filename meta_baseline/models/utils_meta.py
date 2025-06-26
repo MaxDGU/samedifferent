@@ -226,7 +226,7 @@ class EarlyStopping:
             self.best_val = val_acc   
             self.counter = 0
 
-def validate(maml, val_loader, device, adaptation_steps=5, inner_lr=None):
+def validate(maml, val_loader, device, adaptation_steps=5, inner_lr=None, is_test=False):
     """Validation loop for MAML."""
     maml.module.eval()
     total_batches = len(val_loader)
@@ -272,12 +272,13 @@ def validate(maml, val_loader, device, adaptation_steps=5, inner_lr=None):
                     )
                 
                 try:
+                    # For validation/testing, we don't need to create a graph for the outer loop
                     grads = torch.autograd.grad(
                         support_loss,
                         learner.parameters(),
-                        create_graph=True,
+                        create_graph=not is_test, # Turn off for testing
                         allow_unused=True,
-                        retain_graph=True
+                        retain_graph=not is_test # Turn off for testing
                     )
                     
                     # Standard MAML update using the learner's inner LR

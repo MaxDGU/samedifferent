@@ -214,7 +214,8 @@ def main():
             
             test_loss, test_acc = validate(
                 maml, test_loader, device, 
-                args.test_adaptation_steps
+                args.test_adaptation_steps,
+                is_test=True
             )
             
             test_results[task] = {
