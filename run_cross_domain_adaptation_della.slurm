@@ -21,7 +21,7 @@ cd "${GIT_REPO_PATH}"
 echo "Current working directory: $(pwd)"
 
 # --- Data and Model Paths on Della ---
-PB_DATA_DIR="/scratch/gpfs/mg7411/samedifferent/data/pb/pb"
+PB_DATA_DIR="/scratch/gpfs/mg7411/samedifferent/data/meta_h5/pb"
 NAT_DATA_DIR="/scratch/gpfs/mg7411/samedifferent/data/naturalistic"
 OUTPUT_DIR="${GIT_REPO_PATH}/visualizations/cross_domain_pca_final"
 
