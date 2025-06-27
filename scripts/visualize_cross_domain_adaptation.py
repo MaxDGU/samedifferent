@@ -195,13 +195,13 @@ def load_model_checkpoint(path, model_type):
     # Fallback for checkpoints that are just the state_dict
     return checkpoint
 
-def run_pca_analysis(meta_model_path, vanilla_model_path, meta_model_type, vanilla_model_type, model_class, data_loader, dataset_type, adaptation_steps, inner_lr, output_dir, plot_title_prefix):
+def run_pca_analysis(meta_model_path, vanilla_model_path, meta_model_type, vanilla_model_type, meta_model_class, vanilla_model_class, data_loader, dataset_type, adaptation_steps, inner_lr, output_dir, plot_title_prefix):
     """Runs a full PCA analysis for one experiment."""
     os.makedirs(output_dir, exist_ok=True)
 
-    # Use the specified model class, not a hardcoded one
-    meta_model = model_class()
-    vanilla_model = model_class()
+    # Instantiate models using their specific classes
+    meta_model = meta_model_class()
+    vanilla_model = vanilla_model_class()
 
     # Load state dicts using the helper function
     meta_state_dict = load_model_checkpoint(meta_model_path, meta_model_type)
@@ -261,7 +261,8 @@ def main():
         vanilla_model_path=args.vanilla_pb_model,
         meta_model_type='meta_pb',
         vanilla_model_type='vanilla_pb',
-        model_class=Conv6LR_Legacy,  # PB models use the legacy architecture
+        meta_model_class=Conv6LR, # Meta PB model uses the NEW architecture
+        vanilla_model_class=Conv6LR_Legacy, # Vanilla PB model uses the LEGACY architecture
         data_loader=naturalistic_loader,
         dataset_type='naturalistic',
         adaptation_steps=args.adaptation_steps,
@@ -277,7 +278,8 @@ def main():
         vanilla_model_path=args.vanilla_nat_model,
         meta_model_type='meta_naturalistic',
         vanilla_model_type='vanilla_naturalistic',
-        model_class=Conv6LR,  # Naturalistic models use the new architecture
+        meta_model_class=Conv6LR, # Both Naturalistic models use the NEW architecture
+        vanilla_model_class=Conv6LR,
         data_loader=pb_loader,
         dataset_type='pb',
         adaptation_steps=args.adaptation_steps,
