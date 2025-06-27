@@ -25,7 +25,7 @@ PB_DATA_DIR="/scratch/gpfs/mg7411/samedifferent/data/meta_h5/pb"
 NAT_DATA_DIR="/scratch/gpfs/mg7411/samedifferent/data/naturalistic"
 OUTPUT_DIR="${GIT_REPO_PATH}/visualizations/cross_domain_pca_final"
 
-META_NAT_MODEL="/scratch/gpfs/mg7411/samedifferent/logs_naturalistic_meta/conv6lr/seed_111/conv6lr/seed_111/best_model.pt"
+META_NAT_MODEL="/scratch/gpfs/mg7411/samedifferent/logs_naturalistic_meta/conv6lr/seed_111/conv6lr/seed_111/conv6lr_best.pth"
 VANILLA_NAT_MODEL="/scratch/gpfs/mg7411/samedifferent/logs_naturalistic_vanilla/conv6lr/seed_123/best_model.pt"
 META_PB_MODEL="/scratch/gpfs/mg7411/samedifferent/results/pb_retrained_conv6lr/conv6/seed_789/best_model.pt"
 VANILLA_PB_MODEL="/scratch/gpfs/mg7411/results/pb_baselines/regular/conv6/seed_50/best_model.pt"
