@@ -185,8 +185,9 @@ def plot_pca(pca_results, title, output_path):
 
 def load_model_checkpoint(path, model_type):
     """Loads a model checkpoint, handling different formats."""
-    # Add weights_only=True for security and to suppress the warning.
-    checkpoint = torch.load(path, map_location='cpu', weights_only=True)
+    # Reverting weights_only=True as some checkpoints contain argparse.Namespace,
+    # which is safe to load in this trusted context.
+    checkpoint = torch.load(path, map_location='cpu')
     
     # All provided checkpoint paths seem to store the actual model weights 
     # inside the 'model_state_dict' key. The other model types were just 
