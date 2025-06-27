@@ -14,22 +14,22 @@ from .utils import train_epoch, validate, EarlyStopping, train_model, SameDiffer
 
 
 class SameDifferentCNN(nn.Module):
-    def __init__(self, dropout_rate_fc=0.3):
+    def __init__(self, initial_kernel_size=4, initial_filters=12, dropout_rate_fc=0.3):
         super(SameDifferentCNN, self).__init__()
         
         # First layer: 6x6 filters with 18 filters
-        self.conv1 = nn.Conv2d(3, 12, kernel_size=4, stride=1, padding=1)
-        self.bn1 = nn.BatchNorm2d(12)
+        self.conv1 = nn.Conv2d(3, initial_filters, kernel_size=initial_kernel_size, stride=1, padding=1)
+        self.bn1 = nn.BatchNorm2d(initial_filters)
         
         # Subsequent layers: 2x2 filters with doubling filter counts
-        self.conv2 = nn.Conv2d(12, 24, kernel_size=2, stride=1, padding=1)
-        self.bn2 = nn.BatchNorm2d(24)
+        self.conv2 = nn.Conv2d(initial_filters, initial_filters * 2, kernel_size=2, stride=1, padding=1)
+        self.bn2 = nn.BatchNorm2d(initial_filters * 2)
         
-        self.conv3 = nn.Conv2d(24, 48, kernel_size=2, stride=1, padding=1)
-        self.bn3 = nn.BatchNorm2d(48)
+        self.conv3 = nn.Conv2d(initial_filters * 2, initial_filters * 4, kernel_size=2, stride=1, padding=1)
+        self.bn3 = nn.BatchNorm2d(initial_filters * 4)
         
-        self.conv4 = nn.Conv2d(48, 96, kernel_size=2, stride=1, padding=1)
-        self.bn4 = nn.BatchNorm2d(96)
+        self.conv4 = nn.Conv2d(initial_filters * 4, initial_filters * 8, kernel_size=2, stride=1, padding=1)
+        self.bn4 = nn.BatchNorm2d(initial_filters * 8)
         
         # Pooling and dropout
         self.pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
@@ -79,17 +79,17 @@ class SameDifferentCNN(nn.Module):
     def _initialize_weights(self):
         # Initialize convolutional layers
         for m in [self.conv1, self.conv2, self.conv3, self.conv4]:
-            nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            nn.init.xavier_uniform_(m.weight)
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
         
         # Initialize fully connected layers
         for fc in [self.fc1, self.fc2, self.fc3]:
-            nn.init.kaiming_normal_(fc.weight, mode='fan_out', nonlinearity='relu')
+            nn.init.xavier_uniform_(fc.weight)
             nn.init.constant_(fc.bias, 0)
         
         # Initialize classifier
-        nn.init.kaiming_normal_(self.classifier.weight, mode='fan_out', nonlinearity='relu')
+        nn.init.xavier_uniform_(self.classifier.weight)
         nn.init.constant_(self.classifier.bias, 0)
     
     def forward(self, x):
