@@ -207,8 +207,10 @@ def run_pca_analysis(meta_model_path, vanilla_model_path, meta_model_type, vanil
     meta_state_dict = load_model_checkpoint(meta_model_path, meta_model_type)
     vanilla_state_dict = load_model_checkpoint(vanilla_model_path, vanilla_model_type)
     
-    meta_model.load_state_dict(meta_state_dict)
-    vanilla_model.load_state_dict(vanilla_state_dict)
+    # Set strict=False to ignore missing batch norm running stats, which can happen
+    # if models were saved in eval() mode.
+    meta_model.load_state_dict(meta_state_dict, strict=False)
+    vanilla_model.load_state_dict(vanilla_state_dict, strict=False)
     
     meta_model.eval()
     vanilla_model.eval()
