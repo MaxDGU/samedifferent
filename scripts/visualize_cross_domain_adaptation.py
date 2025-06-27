@@ -182,24 +182,17 @@ def plot_pca(pca_results, title, output_path):
 
 def load_model_checkpoint(path, model_type):
     """Loads a model checkpoint, handling different formats."""
-    checkpoint = torch.load(path, map_location='cpu')
-    if model_type == 'meta_pb':
-        # This model is saved within a MAML wrapper
+    # Add weights_only=True for security and to suppress the warning.
+    checkpoint = torch.load(path, map_location='cpu', weights_only=True)
+    
+    # All provided checkpoint paths seem to store the actual model weights 
+    # inside the 'model_state_dict' key. The other model types were just 
+    # special cases of this. We can simplify this function.
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
         return checkpoint['model_state_dict']
-    elif model_type == 'meta_naturalistic':
-        # This is saved in a dict with 'model_state_dict'
-        return checkpoint['model_state_dict']
-    elif model_type == 'vanilla_pb':
-        # This is the raw state dict
-        return checkpoint
-    elif model_type == 'vanilla_naturalistic':
-        # This is also the raw state dict
-        return checkpoint
-    else:
-        # Default assumption for other .pt files
-        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            return checkpoint['model_state_dict']
-        return checkpoint
+    
+    # Fallback for checkpoints that are just the state_dict
+    return checkpoint
 
 def run_pca_analysis(meta_model_path, vanilla_model_path, meta_model_type, vanilla_model_type, data_loader, dataset_type, adaptation_steps, inner_lr, output_dir, plot_title_prefix):
     """Runs a full PCA analysis for one experiment."""
