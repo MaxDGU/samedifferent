@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms as T
+import copy
 
 # --- Path Setup ---
 # Add project root to sys.path to allow for imports like `meta_baseline`
@@ -132,7 +133,8 @@ def get_model_weights(model):
 
 def adapt_and_collect_weights(model, task_data, adaptation_steps, inner_lr, dataset_type):
     """Adapts the model to a task and collects weights at each step."""
-    learner = model.clone()
+    # Use copy.deepcopy for standard nn.Module, as .clone() is for l2l models
+    learner = copy.deepcopy(model)
     optimizer = torch.optim.SGD(learner.parameters(), lr=inner_lr)
     loss_fn = torch.nn.CrossEntropyLoss(reduction='mean')
 
