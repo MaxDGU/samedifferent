@@ -17,7 +17,7 @@ import argparse
 from PIL import Image
 from torchvision import transforms
 #reused methods across all models 
-from .utils_meta import train_epoch, validate, EarlyStopping, SameDifferentDataset
+from .utils_meta import train_epoch, validate, EarlyStopping, SameDifferentDataset, collate_episodes
 
 # Import vanilla model architecture
 from baselines.models.conv2 import SameDifferentCNN

@@ -16,7 +16,7 @@ import sys
 import argparse
 from .utils_meta import (
     SameDifferentDataset, validate, accuracy, EarlyStopping, 
-    train_epoch, collate_episodes, load_model
+    train_epoch, collate_episodes, load_model, collate_episodes
 )
 
 class SameDifferentCNN(nn.Module):
