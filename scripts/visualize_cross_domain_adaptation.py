@@ -156,9 +156,22 @@ def adapt_and_collect_weights(model, task_data, adaptation_steps, inner_lr, data
         optimizer.zero_grad()
         predictions = learner(support_data)
         loss = loss_fn(predictions, support_labels)
+        
+        # Check for unstable loss before backward pass
+        if torch.isnan(loss) or torch.isinf(loss):
+            print(f"  WARNING: Unstable loss ({loss.item()}) at step {step+1}. Halting adaptation for this model.")
+            break
+
         loss.backward()
         optimizer.step()
-        weights_trajectory.append(get_model_weights(learner))
+        
+        current_weights = get_model_weights(learner)
+        # Check for unstable weights after optimizer step
+        if np.isnan(current_weights).any():
+            print(f"  WARNING: NaN values detected in weights at step {step+1}. Halting adaptation for this model.")
+            break # Stop adapting if weights become NaN
+
+        weights_trajectory.append(current_weights)
 
     return weights_trajectory
 
