@@ -162,16 +162,16 @@ def adapt_and_collect_weights(model, task_data, adaptation_steps, inner_lr, data
 
     return weights_trajectory
 
-def plot_pca(pca_results, title, output_path):
-    """Plots the PCA results."""
-    plt.figure(figsize=(12, 10))
-    colors = {'meta': 'r', 'vanilla': 'b'}
-    labels = {'meta': 'Meta-trained', 'vanilla': 'Vanilla-trained'}
-
-    for model_type, trajectory in pca_results.items():
-        plt.plot(trajectory[:, 0], trajectory[:, 1], f'{colors[model_type]}-', alpha=0.5, label=f'{labels[model_type]} Trajectory')
-        plt.scatter(trajectory[0, 0], trajectory[0, 1], c=colors[model_type], marker='o', s=150, edgecolors='k', zorder=5, label=f'{labels[model_type]} Start')
-        plt.scatter(trajectory[-1, 0], trajectory[-1, 1], c=colors[model_type], marker='X', s=200, edgecolors='k', zorder=5, label=f'{labels[model_type]} End')
+def plot_single_pca(pca_trajectory, title, output_path):
+    """Plots the PCA results for a single model's trajectory."""
+    plt.figure(figsize=(10, 8))
+    
+    # Plot trajectory
+    plt.plot(pca_trajectory[:, 0], pca_trajectory[:, 1], 'b-', alpha=0.6, label='Adaptation Trajectory')
+    # Plot start point
+    plt.scatter(pca_trajectory[0, 0], pca_trajectory[0, 1], c='g', marker='o', s=150, edgecolors='k', zorder=5, label='Start Weights')
+    # Plot end point
+    plt.scatter(pca_trajectory[-1, 0], pca_trajectory[-1, 1], c='r', marker='X', s=200, edgecolors='k', zorder=5, label='End Weights')
 
     plt.title(title, fontsize=16)
     plt.xlabel('Principal Component 1', fontsize=12)
@@ -182,6 +182,30 @@ def plot_pca(pca_results, title, output_path):
     plt.savefig(output_path)
     plt.close()
     print(f"PCA plot saved to {output_path}")
+
+def run_single_model_pca(model_path, model_type, model_class, data_loader, dataset_type, adaptation_steps, inner_lr, output_dir, plot_title_prefix):
+    """Runs a PCA analysis for a single model's adaptation."""
+    os.makedirs(output_dir, exist_ok=True)
+
+    model = model_class()
+    state_dict = load_model_checkpoint(model_path, model_type)
+    model.load_state_dict(state_dict, strict=False)
+    model.eval()
+
+    task_data = next(iter(data_loader))
+    
+    trajectory_weights = adapt_and_collect_weights(model, task_data, adaptation_steps, inner_lr, dataset_type)
+    
+    # Perform PCA on this model's trajectory only
+    pca = PCA(n_components=2)
+    pca_trajectory = pca.fit_transform(trajectory_weights)
+
+    # Plotting
+    plot_single_pca(
+        pca_trajectory,
+        f'{plot_title_prefix} Adaptation Weight Drift',
+        os.path.join(output_dir, f'{plot_title_prefix.lower().replace(" ", "_").replace("->", "to")}_pca.png')
+    )
 
 def load_model_checkpoint(path, model_type):
     """Loads a model checkpoint, handling different formats."""
@@ -197,52 +221,6 @@ def load_model_checkpoint(path, model_type):
     
     # Fallback for checkpoints that are just the state_dict
     return checkpoint
-
-def run_pca_analysis(meta_model_path, vanilla_model_path, meta_model_type, vanilla_model_type, meta_model_class, vanilla_model_class, data_loader, dataset_type, adaptation_steps, inner_lr, output_dir, plot_title_prefix):
-    """Runs a full PCA analysis for one experiment."""
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Instantiate models using their specific classes
-    meta_model = meta_model_class()
-    vanilla_model = vanilla_model_class()
-
-    # Load state dicts using the helper function
-    meta_state_dict = load_model_checkpoint(meta_model_path, meta_model_type)
-    vanilla_state_dict = load_model_checkpoint(vanilla_model_path, vanilla_model_type)
-    
-    # Set strict=False to ignore missing batch norm running stats
-    meta_model.load_state_dict(meta_state_dict, strict=False)
-    vanilla_model.load_state_dict(vanilla_state_dict, strict=False)
-    
-    meta_model.eval()
-    vanilla_model.eval()
-
-    task_data = next(iter(data_loader))
-
-    meta_trajectory_weights = adapt_and_collect_weights(meta_model, task_data, adaptation_steps, inner_lr, dataset_type)
-    vanilla_trajectory_weights = adapt_and_collect_weights(vanilla_model, task_data, adaptation_steps, inner_lr, dataset_type)
-
-    # --- FINAL CHECK: Ensure weight vectors are the same size for PCA ---
-    if len(meta_trajectory_weights[0]) != len(vanilla_trajectory_weights[0]):
-        raise ValueError(
-            f"Model architecture mismatch! Cannot perform joint PCA.\n"
-            f"Meta-trained model ('{os.path.basename(meta_model_path)}') has {len(meta_trajectory_weights[0])} parameters.\n"
-            f"Vanilla-trained model ('{os.path.basename(vanilla_model_path)}') has {len(vanilla_trajectory_weights[0])} parameters."
-        )
-
-    all_weights = np.array(meta_trajectory_weights + vanilla_trajectory_weights)
-    
-    pca = PCA(n_components=2)
-    pca.fit(all_weights)
-
-    pca_meta_traj = pca.transform(meta_trajectory_weights)
-    pca_vanilla_traj = pca.transform(vanilla_trajectory_weights)
-
-    plot_pca(
-        {'meta': pca_meta_traj, 'vanilla': pca_vanilla_traj},
-        f'{plot_title_prefix} Adaptation Weight Drift',
-        os.path.join(output_dir, f'{plot_title_prefix.lower().replace(" ", "_")}_pca.png')
-    )
 
 def main():
     parser = argparse.ArgumentParser(description='Run cross-domain adaptation PCA analysis.')
@@ -266,49 +244,63 @@ def main():
     pb_loader = get_pb_ds(args.pb_data_dir, ways=2, shots=args.shots, test_shots=args.shots)
     naturalistic_loader = get_naturalistic_ds(args.naturalistic_data_dir, ways=2, shots=args.shots, test_shots=args.shots)
 
-    # --- Experiment 1: PB -> Naturalistic ---
-    print("Running Experiment 1: PB-trained models adapting to Naturalistic data")
-    try:
-        run_pca_analysis(
-            meta_model_path=args.meta_pb_model,
-            vanilla_model_path=args.vanilla_pb_model,
-            meta_model_type='meta_pb',
-            vanilla_model_type='vanilla_pb',
-            meta_model_class=Conv6LR, # Meta PB model uses the NEW architecture
-            vanilla_model_class=Conv6LR_Legacy, # Vanilla PB model uses the LEGACY architecture
-            data_loader=naturalistic_loader,
-            dataset_type='naturalistic',
-            adaptation_steps=args.adaptation_steps,
-            inner_lr=args.inner_lr,
-            output_dir=args.output_dir,
-            plot_title_prefix='PB to Naturalistic'
-        )
-    except ValueError as e:
-        print(f"\n--- COULD NOT COMPLETE EXPERIMENT 1 ---")
-        print(f"REASON: {e}")
-        print("Please ensure the meta-trained and vanilla-trained models have the same architecture to run this comparison.")
-
-    # --- Experiment 2: Naturalistic -> PB ---
-    print("\nRunning Experiment 2: Naturalistic-trained models adapting to PB data")
-    try:
-        run_pca_analysis(
-            meta_model_path=args.meta_nat_model,
-            vanilla_model_path=args.vanilla_nat_model,
-            meta_model_type='meta_naturalistic',
-            vanilla_model_type='vanilla_naturalistic',
-            meta_model_class=Conv6LR, # Both Naturalistic models use the NEW architecture
-            vanilla_model_class=Conv6LR,
-            data_loader=pb_loader,
-            dataset_type='pb',
-            adaptation_steps=args.adaptation_steps,
-            inner_lr=args.inner_lr,
-            output_dir=args.output_dir,
-            plot_title_prefix='Naturalistic to PB'
-        )
-    except ValueError as e:
-        print(f"\n--- COULD NOT COMPLETE EXPERIMENT 2 ---")
-        print(f"REASON: {e}")
-        print("Please ensure the meta-trained and vanilla-trained models have the same architecture to run this comparison.")
+    # --- Run 4 Separate Analyses ---
     
+    # 1. Meta PB -> Naturalistic
+    print("Running Analysis 1: Meta PB model -> Naturalistic data")
+    run_single_model_pca(
+        model_path=args.meta_pb_model,
+        model_type='meta_pb',
+        model_class=Conv6LR,
+        data_loader=naturalistic_loader,
+        dataset_type='naturalistic',
+        adaptation_steps=args.adaptation_steps,
+        inner_lr=args.inner_lr,
+        output_dir=args.output_dir,
+        plot_title_prefix='Meta PB -> Naturalistic'
+    )
+
+    # 2. Vanilla PB -> Naturalistic
+    print("\nRunning Analysis 2: Vanilla PB model -> Naturalistic data")
+    run_single_model_pca(
+        model_path=args.vanilla_pb_model,
+        model_type='vanilla_pb',
+        model_class=Conv6LR_Legacy,
+        data_loader=naturalistic_loader,
+        dataset_type='naturalistic',
+        adaptation_steps=args.adaptation_steps,
+        inner_lr=args.inner_lr,
+        output_dir=args.output_dir,
+        plot_title_prefix='Vanilla PB -> Naturalistic'
+    )
+
+    # 3. Meta Naturalistic -> PB
+    print("\nRunning Analysis 3: Meta Naturalistic model -> PB data")
+    run_single_model_pca(
+        model_path=args.meta_nat_model,
+        model_type='meta_naturalistic',
+        model_class=Conv6LR,
+        data_loader=pb_loader,
+        dataset_type='pb',
+        adaptation_steps=args.adaptation_steps,
+        inner_lr=args.inner_lr,
+        output_dir=args.output_dir,
+        plot_title_prefix='Meta Naturalistic -> PB'
+    )
+
+    # 4. Vanilla Naturalistic -> PB
+    print("\nRunning Analysis 4: Vanilla Naturalistic model -> PB data")
+    run_single_model_pca(
+        model_path=args.vanilla_nat_model,
+        model_type='vanilla_naturalistic',
+        model_class=Conv6LR,
+        data_loader=pb_loader,
+        dataset_type='pb',
+        adaptation_steps=args.adaptation_steps,
+        inner_lr=args.inner_lr,
+        output_dir=args.output_dir,
+        plot_title_prefix='Vanilla Naturalistic -> PB'
+    )
+
 if __name__ == '__main__':
     main() 
