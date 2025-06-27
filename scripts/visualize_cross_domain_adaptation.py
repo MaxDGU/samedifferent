@@ -17,6 +17,7 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from meta_baseline.models.conv6lr import SameDifferentCNN as Conv6LR
+from meta_baseline.models.conv6lr_legacy import Conv6LR_Legacy
 
 # --- Data Loading Classes (copied from other scripts) ---
 
@@ -198,10 +199,11 @@ def run_pca_analysis(meta_model_path, vanilla_model_path, meta_model_type, vanil
     """Runs a full PCA analysis for one experiment."""
     os.makedirs(output_dir, exist_ok=True)
 
-    meta_model = Conv6LR()
-    vanilla_model = Conv6LR()
+    # Use the legacy model architecture for loading the checkpoints
+    meta_model = Conv6LR_Legacy()
+    vanilla_model = Conv6LR_Legacy()
 
-    # Load state dicts using the new helper function
+    # Load state dicts using the helper function
     meta_state_dict = load_model_checkpoint(meta_model_path, meta_model_type)
     vanilla_state_dict = load_model_checkpoint(vanilla_model_path, vanilla_model_type)
     
