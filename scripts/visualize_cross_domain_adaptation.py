@@ -209,8 +209,7 @@ def run_pca_analysis(meta_model_path, vanilla_model_path, meta_model_type, vanil
     meta_state_dict = load_model_checkpoint(meta_model_path, meta_model_type)
     vanilla_state_dict = load_model_checkpoint(vanilla_model_path, vanilla_model_type)
     
-    # Set strict=False to ignore missing batch norm running stats, which can happen
-    # if models were saved in eval() mode.
+    # Set strict=False to ignore missing batch norm running stats
     meta_model.load_state_dict(meta_state_dict, strict=False)
     vanilla_model.load_state_dict(vanilla_state_dict, strict=False)
     
@@ -221,6 +220,14 @@ def run_pca_analysis(meta_model_path, vanilla_model_path, meta_model_type, vanil
 
     meta_trajectory_weights = adapt_and_collect_weights(meta_model, task_data, adaptation_steps, inner_lr, dataset_type)
     vanilla_trajectory_weights = adapt_and_collect_weights(vanilla_model, task_data, adaptation_steps, inner_lr, dataset_type)
+
+    # --- FINAL CHECK: Ensure weight vectors are the same size for PCA ---
+    if len(meta_trajectory_weights[0]) != len(vanilla_trajectory_weights[0]):
+        raise ValueError(
+            f"Model architecture mismatch! Cannot perform joint PCA.\n"
+            f"Meta-trained model ('{os.path.basename(meta_model_path)}') has {len(meta_trajectory_weights[0])} parameters.\n"
+            f"Vanilla-trained model ('{os.path.basename(vanilla_model_path)}') has {len(vanilla_trajectory_weights[0])} parameters."
+        )
 
     all_weights = np.array(meta_trajectory_weights + vanilla_trajectory_weights)
     
@@ -260,37 +267,47 @@ def main():
 
     # --- Experiment 1: PB -> Naturalistic ---
     print("Running Experiment 1: PB-trained models adapting to Naturalistic data")
-    run_pca_analysis(
-        meta_model_path=args.meta_pb_model,
-        vanilla_model_path=args.vanilla_pb_model,
-        meta_model_type='meta_pb',
-        vanilla_model_type='vanilla_pb',
-        meta_model_class=Conv6LR, # Meta PB model uses the NEW architecture
-        vanilla_model_class=Conv6LR_Legacy, # Vanilla PB model uses the LEGACY architecture
-        data_loader=naturalistic_loader,
-        dataset_type='naturalistic',
-        adaptation_steps=args.adaptation_steps,
-        inner_lr=args.inner_lr,
-        output_dir=args.output_dir,
-        plot_title_prefix='PB to Naturalistic'
-    )
+    try:
+        run_pca_analysis(
+            meta_model_path=args.meta_pb_model,
+            vanilla_model_path=args.vanilla_pb_model,
+            meta_model_type='meta_pb',
+            vanilla_model_type='vanilla_pb',
+            meta_model_class=Conv6LR, # Meta PB model uses the NEW architecture
+            vanilla_model_class=Conv6LR_Legacy, # Vanilla PB model uses the LEGACY architecture
+            data_loader=naturalistic_loader,
+            dataset_type='naturalistic',
+            adaptation_steps=args.adaptation_steps,
+            inner_lr=args.inner_lr,
+            output_dir=args.output_dir,
+            plot_title_prefix='PB to Naturalistic'
+        )
+    except ValueError as e:
+        print(f"\n--- COULD NOT COMPLETE EXPERIMENT 1 ---")
+        print(f"REASON: {e}")
+        print("Please ensure the meta-trained and vanilla-trained models have the same architecture to run this comparison.")
 
     # --- Experiment 2: Naturalistic -> PB ---
     print("\nRunning Experiment 2: Naturalistic-trained models adapting to PB data")
-    run_pca_analysis(
-        meta_model_path=args.meta_nat_model,
-        vanilla_model_path=args.vanilla_nat_model,
-        meta_model_type='meta_naturalistic',
-        vanilla_model_type='vanilla_naturalistic',
-        meta_model_class=Conv6LR, # Both Naturalistic models use the NEW architecture
-        vanilla_model_class=Conv6LR,
-        data_loader=pb_loader,
-        dataset_type='pb',
-        adaptation_steps=args.adaptation_steps,
-        inner_lr=args.inner_lr,
-        output_dir=args.output_dir,
-        plot_title_prefix='Naturalistic to PB'
-    )
+    try:
+        run_pca_analysis(
+            meta_model_path=args.meta_nat_model,
+            vanilla_model_path=args.vanilla_nat_model,
+            meta_model_type='meta_naturalistic',
+            vanilla_model_type='vanilla_naturalistic',
+            meta_model_class=Conv6LR, # Both Naturalistic models use the NEW architecture
+            vanilla_model_class=Conv6LR,
+            data_loader=pb_loader,
+            dataset_type='pb',
+            adaptation_steps=args.adaptation_steps,
+            inner_lr=args.inner_lr,
+            output_dir=args.output_dir,
+            plot_title_prefix='Naturalistic to PB'
+        )
+    except ValueError as e:
+        print(f"\n--- COULD NOT COMPLETE EXPERIMENT 2 ---")
+        print(f"REASON: {e}")
+        print("Please ensure the meta-trained and vanilla-trained models have the same architecture to run this comparison.")
     
 if __name__ == '__main__':
     main() 
