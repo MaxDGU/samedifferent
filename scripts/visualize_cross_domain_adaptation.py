@@ -16,7 +16,7 @@ from torchvision import transforms as T
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from meta_baseline.models.conv6lr import Conv6LR
+from meta_baseline.models.conv6lr import SameDifferentCNN as Conv6LR
 
 # --- Data Loading Classes (copied from other scripts) ---
 
