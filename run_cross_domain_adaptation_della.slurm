@@ -28,7 +28,7 @@ OUTPUT_DIR="${GIT_REPO_PATH}/visualizations/cross_domain_pca_final"
 META_NAT_MODEL="/scratch/gpfs/mg7411/samedifferent/logs_naturalistic_meta/conv6lr/seed_111/conv6lr/seed_111/conv6lr_best.pth"
 VANILLA_NAT_MODEL="/scratch/gpfs/mg7411/samedifferent/logs_naturalistic_vanilla/conv6lr/seed_123/best_model.pt"
 META_PB_MODEL="/scratch/gpfs/mg7411/samedifferent/results/pb_retrained_conv6lr/conv6/seed_789/best_model.pt"
-VANILLA_PB_MODEL="/scratch/gpfs/mg7411/results/pb_baselines/regular/conv6/seed_50/best_model.pt"
+VANILLA_PB_MODEL="/scratch/gpfs/mg7411/samedifferent/results/pb_baselines_retrained/all_tasks/conv6/test_regular/seed_42/best_model.pt"
 
 
 # --- Execution ---
@@ -42,7 +42,7 @@ python -u scripts/visualize_cross_domain_adaptation.py \
     --meta_nat_model "${META_NAT_MODEL}" \
     --vanilla_nat_model "${VANILLA_NAT_MODEL}" \
     --shots 10 \
-    --adaptation_steps 15 \
-    --inner_lr 0.01
+    --adaptation_steps 5 \
+    --inner_lr 0.1
 
 echo "Job finished with exit code $? at $(date)" 

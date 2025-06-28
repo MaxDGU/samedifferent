@@ -175,50 +175,88 @@ def adapt_and_collect_weights(model, task_data, adaptation_steps, inner_lr, data
 
     return weights_trajectory
 
-def plot_single_pca(pca_trajectory, title, output_path):
-    """Plots the PCA results for a single model's trajectory."""
-    plt.figure(figsize=(10, 8))
+def run_and_plot_joint_pca(
+    meta_model_path,
+    vanilla_model_path,
+    model_class_meta,
+    model_class_vanilla,
+    data_loader,
+    dataset_type,
+    adaptation_steps,
+    inner_lr,
+    output_path,
+    plot_title
+):
+    """
+    Performs a joint PCA on the adaptation trajectories of a meta and a vanilla model.
+    """
+    print(f"--- Running Joint PCA for: {plot_title} ---")
     
-    # Plot trajectory
-    plt.plot(pca_trajectory[:, 0], pca_trajectory[:, 1], 'b-', alpha=0.6, label='Adaptation Trajectory')
-    # Plot start point
-    plt.scatter(pca_trajectory[0, 0], pca_trajectory[0, 1], c='g', marker='o', s=150, edgecolors='k', zorder=5, label='Start Weights')
-    # Plot end point
-    plt.scatter(pca_trajectory[-1, 0], pca_trajectory[-1, 1], c='r', marker='X', s=200, edgecolors='k', zorder=5, label='End Weights')
+    # --- Load Models ---
+    # Meta Model
+    meta_model = model_class_meta()
+    meta_state_dict = load_model_checkpoint(meta_model_path, 'meta')
+    meta_model.load_state_dict(meta_state_dict, strict=True)
+    meta_model.eval()
+    
+    # Vanilla Model
+    vanilla_model = model_class_vanilla()
+    vanilla_state_dict = load_model_checkpoint(vanilla_model_path, 'vanilla')
+    vanilla_model.load_state_dict(vanilla_state_dict, strict=True)
+    vanilla_model.eval()
 
-    plt.title(title, fontsize=16)
-    plt.xlabel('Principal Component 1', fontsize=12)
-    plt.ylabel('Principal Component 2', fontsize=12)
-    plt.legend()
-    plt.grid(True)
+    # --- Ensure models have the same architecture ---
+    meta_params = sum(p.numel() for p in meta_model.parameters())
+    vanilla_params = sum(p.numel() for p in vanilla_model.parameters())
+    if meta_params != vanilla_params:
+        print(f"ERROR: Model parameter counts do not match!")
+        print(f"  Meta Model ({meta_model_path}): {meta_params} parameters")
+        print(f"  Vanilla Model ({vanilla_model_path}): {vanilla_params} parameters")
+        print("Skipping this PCA plot due to architecture mismatch.")
+        return
+
+    # --- Adapt and Collect Weights ---
+    # Use the same adaptation task for both models
+    task_data = next(iter(data_loader))
+
+    print("Adapting Meta model...")
+    meta_weights = adapt_and_collect_weights(meta_model, task_data, adaptation_steps, inner_lr, dataset_type)
+    
+    print("Adapting Vanilla model...")
+    vanilla_weights = adapt_and_collect_weights(vanilla_model, task_data, adaptation_steps, inner_lr, dataset_type)
+    
+    # --- Joint PCA ---
+    print("Performing joint PCA...")
+    all_weights = np.vstack(meta_weights + vanilla_weights)
+    pca = PCA(n_components=2)
+    pca.fit(all_weights)
+    
+    # Transform trajectories using the single fitted PCA
+    meta_pca = pca.transform(meta_weights)
+    vanilla_pca = pca.transform(vanilla_weights)
+
+    # --- Plotting ---
+    plt.figure(figsize=(12, 10))
+    
+    # Plot Meta Trajectory
+    plt.plot(meta_pca[:, 0], meta_pca[:, 1], 'b-', alpha=0.7, linewidth=2, label='Meta Adaptation')
+    plt.scatter(meta_pca[0, 0], meta_pca[0, 1], c='blue', marker='o', s=150, edgecolors='k', zorder=5, label='Meta Start')
+    plt.scatter(meta_pca[-1, 0], meta_pca[-1, 1], c='blue', marker='X', s=200, edgecolors='k', zorder=5, label='Meta End')
+    
+    # Plot Vanilla Trajectory
+    plt.plot(vanilla_pca[:, 0], vanilla_pca[:, 1], 'r-', alpha=0.7, linewidth=2, label='Vanilla Adaptation')
+    plt.scatter(vanilla_pca[0, 0], vanilla_pca[0, 1], c='red', marker='o', s=150, edgecolors='k', zorder=5, label='Vanilla Start')
+    plt.scatter(vanilla_pca[-1, 0], vanilla_pca[-1, 1], c='red', marker='X', s=200, edgecolors='k', zorder=5, label='Vanilla End')
+
+    plt.title(plot_title, fontsize=18)
+    plt.xlabel('Principal Component 1', fontsize=14)
+    plt.ylabel('Principal Component 2', fontsize=14)
+    plt.legend(fontsize=12)
+    plt.grid(True, linestyle='--', alpha=0.6)
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
-    print(f"PCA plot saved to {output_path}")
-
-def run_single_model_pca(model_path, model_type, model_class, data_loader, dataset_type, adaptation_steps, inner_lr, output_dir, plot_title_prefix):
-    """Runs a PCA analysis for a single model's adaptation."""
-    os.makedirs(output_dir, exist_ok=True)
-
-    model = model_class()
-    state_dict = load_model_checkpoint(model_path, model_type)
-    model.load_state_dict(state_dict, strict=False)
-    model.eval()
-
-    task_data = next(iter(data_loader))
-    
-    trajectory_weights = adapt_and_collect_weights(model, task_data, adaptation_steps, inner_lr, dataset_type)
-    
-    # Perform PCA on this model's trajectory only
-    pca = PCA(n_components=2)
-    pca_trajectory = pca.fit_transform(trajectory_weights)
-
-    # Plotting
-    plot_single_pca(
-        pca_trajectory,
-        f'{plot_title_prefix} Adaptation Weight Drift',
-        os.path.join(output_dir, f'{plot_title_prefix.lower().replace(" ", "_").replace("->", "to")}_pca.png')
-    )
+    print(f"Joint PCA plot saved to {output_path}")
 
 def load_model_checkpoint(path, model_type):
     """Loads a model checkpoint, handling different formats."""
@@ -248,72 +286,50 @@ def main():
     parser.add_argument('--vanilla_nat_model', type=str, required=True, help='Path to vanilla-trained naturalistic model.')
     # --- Hyperparameters ---
     parser.add_argument('--shots', type=int, default=10, help='Support set size for adaptation.')
-    parser.add_argument('--adaptation_steps', type=int, default=15, help='Number of adaptation steps.')
-    parser.add_argument('--inner_lr', type=float, default=0.01, help='Learning rate for adaptation.')
-
+    parser.add_argument('--test_shots', type=int, default=10, help='Query set size (unused, but for consistency).')
+    parser.add_argument('--ways', type=int, default=2, help='Number of classes (always 2 for same-different).')
+    parser.add_argument('--adaptation_steps', type=int, default=5, help='Number of adaptation steps.')
+    parser.add_argument('--inner_lr', type=float, default=0.1, help='Learning rate for adaptation.')
+    
     args = parser.parse_args()
-    
-    # --- Setup DataLoaders ---
-    pb_loader = get_pb_ds(args.pb_data_dir, ways=2, shots=args.shots, test_shots=args.shots)
-    naturalistic_loader = get_naturalistic_ds(args.naturalistic_data_dir, ways=2, shots=args.shots, test_shots=args.shots)
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    # --- Run 4 Separate Analyses ---
-    
-    # 1. Meta PB -> Naturalistic
-    print("Running Analysis 1: Meta PB model -> Naturalistic data")
-    run_single_model_pca(
-        model_path=args.meta_pb_model,
-        model_type='meta_pb',
-        model_class=Conv6LR,
+    # --- Get Data Loaders ---
+    print("Preparing data loaders...")
+    # For adapting to Naturalistic, we use the naturalistic 'test' set.
+    naturalistic_loader = get_naturalistic_ds(args.naturalistic_data_dir, args.ways, args.shots, args.test_shots)
+    # For adapting to PB, we use the PB 'test' set.
+    pb_loader = get_pb_ds(args.pb_data_dir, args.ways, args.shots, args.test_shots)
+
+    # --- Analysis 1: PB-trained models adapting to Naturalistic data ---
+    run_and_plot_joint_pca(
+        meta_model_path=args.meta_pb_model,
+        vanilla_model_path=args.vanilla_pb_model,
+        model_class_meta=Conv6LR,
+        model_class_vanilla=Conv6LR, # Both should now use the same, non-legacy class
         data_loader=naturalistic_loader,
         dataset_type='naturalistic',
         adaptation_steps=args.adaptation_steps,
         inner_lr=args.inner_lr,
-        output_dir=args.output_dir,
-        plot_title_prefix='Meta PB -> Naturalistic'
+        output_path=os.path.join(args.output_dir, 'pb_to_naturalistic_pca.png'),
+        plot_title='PB-Trained Models Adapting to Naturalistic Data'
     )
 
-    # 2. Vanilla PB -> Naturalistic
-    print("\nRunning Analysis 2: Vanilla PB model -> Naturalistic data")
-    run_single_model_pca(
-        model_path=args.vanilla_pb_model,
-        model_type='vanilla_pb',
-        model_class=Conv6LR_Legacy,
-        data_loader=naturalistic_loader,
-        dataset_type='naturalistic',
-        adaptation_steps=args.adaptation_steps,
-        inner_lr=args.inner_lr,
-        output_dir=args.output_dir,
-        plot_title_prefix='Vanilla PB -> Naturalistic'
-    )
-
-    # 3. Meta Naturalistic -> PB
-    print("\nRunning Analysis 3: Meta Naturalistic model -> PB data")
-    run_single_model_pca(
-        model_path=args.meta_nat_model,
-        model_type='meta_naturalistic',
-        model_class=Conv6LR,
+    # --- Analysis 2: Naturalistic-trained models adapting to PB data ---
+    run_and_plot_joint_pca(
+        meta_model_path=args.meta_nat_model,
+        vanilla_model_path=args.vanilla_nat_model,
+        model_class_meta=Conv6LR,
+        model_class_vanilla=Conv6LR,
         data_loader=pb_loader,
         dataset_type='pb',
         adaptation_steps=args.adaptation_steps,
         inner_lr=args.inner_lr,
-        output_dir=args.output_dir,
-        plot_title_prefix='Meta Naturalistic -> PB'
+        output_path=os.path.join(args.output_dir, 'naturalistic_to_pb_pca.png'),
+        plot_title='Naturalistic-Trained Models Adapting to PB Data'
     )
 
-    # 4. Vanilla Naturalistic -> PB
-    print("\nRunning Analysis 4: Vanilla Naturalistic model -> PB data")
-    run_single_model_pca(
-        model_path=args.vanilla_nat_model,
-        model_type='vanilla_naturalistic',
-        model_class=Conv6LR,
-        data_loader=pb_loader,
-        dataset_type='pb',
-        adaptation_steps=args.adaptation_steps,
-        inner_lr=args.inner_lr,
-        output_dir=args.output_dir,
-        plot_title_prefix='Vanilla Naturalistic -> PB'
-    )
+    print("\nPCA analysis complete.")
 
 if __name__ == '__main__':
     main() 
