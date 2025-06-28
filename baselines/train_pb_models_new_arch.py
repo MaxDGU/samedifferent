@@ -87,7 +87,7 @@ def main():
     
     for epoch in range(args.epochs):
         print(f'\\nEpoch {epoch+1}/{args.epochs}')
-        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer)
+        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
         
         if (epoch + 1) % args.val_freq == 0:
             val_loss, val_acc = validate(model, val_loader, criterion, device)

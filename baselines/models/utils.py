@@ -105,7 +105,7 @@ class SameDifferentDataset(Dataset):
         
         return {'image': image, 'label': label, 'task': task_name}
 
-def train_epoch(model, train_loader, optimizer, device):
+def train_epoch(model, train_loader, criterion, optimizer, device):
     """Train for one epoch."""
     model.train()
     running_loss = 0.0
@@ -119,7 +119,7 @@ def train_epoch(model, train_loader, optimizer, device):
         optimizer.zero_grad()
         outputs = model(images)
         
-        loss = F.cross_entropy(outputs, labels.long())
+        loss = criterion(outputs, labels.long())
         loss.backward()
         
         optimizer.step()
@@ -136,7 +136,7 @@ def train_epoch(model, train_loader, optimizer, device):
     
     return running_loss / len(train_loader), running_acc / len(train_loader)
 
-def validate(model, val_loader, device):
+def validate(model, val_loader, criterion, device):
     """Validate the model."""
     model.eval()
     val_loss = 0.0
@@ -148,7 +148,7 @@ def validate(model, val_loader, device):
             labels = batch['label'].to(device)
             
             outputs = model(images)
-            loss = F.cross_entropy(outputs, labels.long())
+            loss = criterion(outputs, labels.long())
             
             preds = outputs.argmax(dim=1)
             acc = (preds == labels).float().mean()
@@ -235,11 +235,11 @@ def train_model(model_class, args):
         print(f"\nEpoch {epoch + 1}/{num_epochs}")
         
         #import train_epoch from utils and validate 
-        train_loss, train_acc = train_epoch(model, train_loader, optimizer, device)
+        train_loss, train_acc = train_epoch(model, train_loader, F.cross_entropy, optimizer, device)
         print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
         train_accs.append(train_acc)
         
-        val_loss, val_acc = validate(model, val_loader, device)
+        val_loss, val_acc = validate(model, val_loader, F.cross_entropy, device)
         print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
         val_accs.append(val_acc)
         
@@ -265,7 +265,7 @@ def train_model(model_class, args):
     model.load_state_dict(checkpoint['model_state_dict'])
     
     # Final validation pass (using this as test set)
-    final_val_loss, final_val_acc = validate(model, val_loader, device)
+    final_val_loss, final_val_acc = validate(model, val_loader, F.cross_entropy, device)
     print(f"\nFinal Results:")
     print(f"Test Loss: {final_val_loss:.4f}")
     print(f"Test Accuracy: {final_val_acc:.4f}")
