@@ -12,7 +12,7 @@ from PIL import Image
 from torchvision import transforms
 import json
 from torch.utils.data import Dataset, DataLoader
-import tqdm
+from tqdm import tqdm
 import h5py
 
 
