@@ -39,7 +39,7 @@ python -u baselines/train_pb_models_new_arch.py \
     --epochs 150 \
     --patience 10 \
     --val_freq 5 \
-    --data_dir /scratch/gpfs/mg7411/samedifferent/data/pb/pb \
+    --data_dir /scratch/gpfs/mg7411/data/pb/pb \
     --output_dir /scratch/gpfs/mg7411/samedifferent/results/pb_baselines_retrained
 
 echo "Job finished with exit code $? at $(date)" 
