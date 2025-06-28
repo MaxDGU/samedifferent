@@ -78,7 +78,7 @@ def main():
     
     model = model.to(device)
     
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     
     best_val_acc = 0
