@@ -10,7 +10,7 @@ import json
 # Add the root directory to the path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scripts.model_for_loading import SameDifferentCNN_from_checkpoint
+from scripts.model_loader import SameDifferentCNN
 from meta_baseline.models.utils_meta import SameDifferentDataset, collate_episodes, validate
 
 def main():
@@ -26,8 +26,8 @@ def main():
         print(f"ERROR: Model file not found at {model_path}")
         sys.exit(1)
 
-    # Use the reverse-engineered model
-    model = SameDifferentCNN_from_checkpoint().to(device)
+    # Use the model from the new loader
+    model = SameDifferentCNN().to(device)
     
     checkpoint = torch.load(model_path, map_location=device)
     
