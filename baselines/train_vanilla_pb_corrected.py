@@ -14,7 +14,7 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from baselines.models.utils import SameDifferentDataset, train_epoch, validate, EarlyStopping
+from baselines.models.utils import SameDifferentDataset, train_epoch, validate, EarlyStopping, PB_TASKS
 from meta_baseline.models.conv6lr import SameDifferentCNN # Use the modern conv6lr architecture
 
 def main(args):
@@ -40,16 +40,16 @@ def main(args):
     print(f"Output will be saved to: {output_dir}")
 
     # --- Data Loading ---
-    # Using 'all_tasks' to train a generalist vanilla model on the PB dataset
-    print("Loading PB dataset...")
+    # Using all available PB tasks to train a generalist vanilla model.
+    print("Loading PB dataset for all tasks...")
     train_dataset = SameDifferentDataset(
         data_dir=args.data_dir,
-        task_names='all_tasks', # Special keyword to load all PB tasks
+        task_names=PB_TASKS, # Pass the imported list of all task names
         split='train'
     )
     val_dataset = SameDifferentDataset(
         data_dir=args.data_dir,
-        task_names='all_tasks',
+        task_names=PB_TASKS, # Pass the imported list of all task names
         split='val'
     )
 
