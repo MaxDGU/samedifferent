@@ -54,7 +54,7 @@ def main(args):
     print(f"Model: {type(model).__name__} | Trainable Params: {total_params / 1e6:.2f}M")
     
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.CrossEntropyLoss()
     early_stopping = EarlyStopping(patience=args.patience, min_delta=args.improvement_threshold)
     
     best_val_acc = 0.0
