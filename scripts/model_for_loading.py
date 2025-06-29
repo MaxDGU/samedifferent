@@ -61,16 +61,14 @@ class SameDifferentCNN_from_checkpoint(nn.Module):
         x = self.pool(F.relu(self.bn1(self.conv1(x))))
         x = self.pool(F.relu(self.bn2(self.conv2(x))))
         
-        # Flatten the features for the fully connected layers
-        x = x.view(x.size(0), -1)
+        # Flatten the features for the fully connected layers.
+        # Use .reshape() instead of .view() to handle non-contiguous tensors.
+        x = x.reshape(x.size(0), -1)
         
-        # The size might not match _to_linear perfectly due to pooling, so we'll warn if so.
+        # The size might not match _to_linear perfectly due to pooling. If so, a
+        # size mismatch error will occur on the first Linear layer below.
         if x.shape[1] != self._to_linear:
-            print(f"Warning: Flattened size ({x.shape[1]}) does not match expected size ({self._to_linear}). Adapting.")
-            # In a real scenario, we might need to pad or truncate, but for inspection,
-            # we can't proceed with the linear layers if the size is wrong.
-            # For now, let's just pass it to the first layer and let it error out if it's not right.
-            pass
+            raise RuntimeError(f"FATAL: Flattened size ({x.shape[1]}) does not match expected linear layer input size ({self._to_linear}). The reconstructed forward pass is incorrect.")
 
         for fc, ln in zip(self.fc_layers, self.layer_norms):
             x = F.relu(ln(fc(x)))
