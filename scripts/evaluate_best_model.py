@@ -10,7 +10,7 @@ import json
 # Add the root directory to the path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from meta_baseline.models.conv6lr import SameDifferentCNN
+from scripts.model_for_loading import SameDifferentCNN_from_checkpoint
 from meta_baseline.models.utils_meta import SameDifferentDataset, collate_episodes, validate
 
 def main():
@@ -26,23 +26,17 @@ def main():
         print(f"ERROR: Model file not found at {model_path}")
         sys.exit(1)
 
-    model = SameDifferentCNN().to(device)
-    maml = l2l.algorithms.MAML(model, lr=0.05) # lr doesn't matter for testing
+    # Use the reverse-engineered model
+    model = SameDifferentCNN_from_checkpoint().to(device)
     
     checkpoint = torch.load(model_path, map_location=device)
     
-    # The provided model might have a different structure. 
-    # Let's check for 'maml_state_dict' first, then 'model_state_dict'.
-    if 'maml_state_dict' in checkpoint:
-        maml.load_state_dict(checkpoint['maml_state_dict'])
-        print("Loaded maml_state_dict from checkpoint.")
-    elif 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
-        print("Loaded model_state_dict from checkpoint.")
-    else:
-        # If neither is present, assume the checkpoint IS the state dict.
-        model.load_state_dict(checkpoint)
-        print("Loaded state_dict directly from checkpoint root.")
+    # Load the state dict directly into our new model
+    model.load_state_dict(checkpoint['model_state_dict'])
+    print("Loaded model_state_dict into the reconstructed model.")
+        
+    # Now, wrap the loaded model with MAML
+    maml = l2l.algorithms.MAML(model, lr=0.05) # lr doesn't matter for testing
         
     print(f"Loaded trained model from {model_path}")
 
