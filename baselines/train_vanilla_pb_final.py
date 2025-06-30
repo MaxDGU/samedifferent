@@ -23,19 +23,35 @@ def main(args):
         torch.cuda.manual_seed_all(args.seed)
 
     # Create save directory
-    save_dir = os.path.join(args.save_dir, f"test_{args.test_task}", f"seed_{args.seed}")
+    if args.test_task:
+        save_dir = os.path.join(args.save_dir, f"test_{args.test_task}", f"seed_{args.seed}")
+        print(f"Output will be saved to: {save_dir}")
+    else:
+        save_dir = os.path.join(args.save_dir, f"seed_{args.seed}")
+        print(f"Output will be saved to: {save_dir}")
     os.makedirs(save_dir, exist_ok=True)
-    print(f"Output will be saved to: {save_dir}")
 
     # Setup Datasets
     all_tasks = ['original', 'filled', 'lines', 'arrows', 'scrambled', 'wider_line', 'open', 'regular', 'random_color', 'irregular']
-    train_tasks = [t for t in all_tasks if t != args.test_task]
-    print(f"Training on all PB tasks except '{args.test_task}', which is used for validation/testing.")
+    
+    if args.test_task:
+        train_tasks = [t for t in all_tasks if t != args.test_task]
+        val_tasks = [args.test_task]
+        test_tasks = [args.test_task]
+        print(f"Training on all PB tasks except '{args.test_task}', which is used for validation/testing.")
+    else:
+        train_tasks = all_tasks
+        val_tasks = all_tasks
+        test_tasks = all_tasks
+        print("Training on all available PB tasks. Using combined val/test splits from all tasks.")
 
     train_datasets = [VanillaPBDataset(task=t, split='train', data_dir=args.data_dir) for t in train_tasks]
+    val_datasets = [VanillaPBDataset(task=t, split='val', data_dir=args.data_dir) for t in val_tasks]
+    test_datasets = [VanillaPBDataset(task=t, split='test', data_dir=args.data_dir) for t in test_tasks]
+    
     train_dataset = ConcatDataset(train_datasets)
-    val_dataset = VanillaPBDataset(task=args.test_task, split='val', data_dir=args.data_dir)
-    test_dataset = VanillaPBDataset(task=args.test_task, split='test', data_dir=args.data_dir)
+    val_dataset = ConcatDataset(val_datasets)
+    test_dataset = ConcatDataset(test_datasets)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True)
@@ -86,7 +102,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train vanilla model on PB tasks with corrected architecture.')
     parser.add_argument('--data_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/data/vanilla_h5', help='Directory for the dataset')
     parser.add_argument('--save_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/results/pb_baselines_stable/all_tasks/conv6lr', help='Parent directory to save results')
-    parser.add_argument('--test_task', type=str, required=True, help='Task to hold out for validation and testing')
+    parser.add_argument('--test_task', type=str, default=None, help='Task to hold out. If None, trains on all tasks.')
     parser.add_argument('--seed', type=int, required=True, help='Random seed for reproducibility')
     parser.add_argument('--epochs', type=int, default=100, help='Max number of training epochs')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
