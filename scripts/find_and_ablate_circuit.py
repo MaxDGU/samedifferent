@@ -75,6 +75,7 @@ class SameDifferentDataset(Dataset):
             'query_images': query_images,
             'query_labels': query_labels.squeeze(),
             'task': file_info['task'],
+            'support_size': file_info['support_size']
         }
 
 def set_seed(seed):
