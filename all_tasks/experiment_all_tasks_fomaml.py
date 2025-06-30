@@ -480,11 +480,10 @@ def main(args):
 
     maml = l2l.algorithms.MAML(
         model,
-        lr=effective_inner_lr, 
-        first_order=args.first_order, 
+        lr=effective_inner_lr,
+        first_order=args.first_order,
         allow_unused=True, 
-        allow_nograd=True,
-        track_running_stats=args.track_running_stats_maml # This is already correct
+        allow_nograd=True
     )
     maml.to(device)
     optimizer = torch.optim.AdamW(maml.parameters(), lr=args.outer_lr, weight_decay=args.weight_decay)
@@ -695,7 +694,6 @@ if __name__ == '__main__':
 
     # --- MAML specific ---
     parser.add_argument('--first_order', action='store_true', help='Use First-Order MAML (FOMAML). If not set, 2nd order MAML is used.')
-    parser.add_argument('--track_running_stats_maml', action='store_true', help='If set, MAML will use track_running_stats=True for BatchNorm layers.')
     
     # --- Meta-learning parameters ---
     parser.add_argument('--meta_batch_size', type=int, default=8, help='Number of tasks per meta-batch.')
@@ -733,10 +731,6 @@ if __name__ == '__main__':
     
     main_args = parser.parse_args()
     
-    # Print effective track_running_stats setting
-    # This is now controlled by the track_running_stats arg passed to l2l.MAML
-    print(f"l2l.MAML initialized with track_running_stats={main_args.track_running_stats_maml}")
-
     exit_code = 0 # Default to success
     try:
         main(main_args)
