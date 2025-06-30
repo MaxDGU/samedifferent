@@ -14,7 +14,7 @@ from data.meta_data_generator_h5 import MetaDatasetGenerator
 
 def load_model(path, device):
     """Loads a model checkpoint."""
-    model = SameDifferentCNN(num_classes=2).to(device)
+    model = SameDifferentCNN().to(device)
     try:
         # Try loading the whole checkpoint
         checkpoint = torch.load(path, map_location=device)
