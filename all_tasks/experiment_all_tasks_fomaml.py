@@ -1,6 +1,13 @@
 #!/bin/env python
 import os
+import sys
 import torch
+
+# Add project root to path to allow imports from meta_baseline
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 import torch.nn.functional as F
 import torch.nn as nn
 # Import from the 'meta_baseline.models' package
