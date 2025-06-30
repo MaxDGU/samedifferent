@@ -2,6 +2,8 @@ import tensorflow as tf
 import numpy as np
 import h5py
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from generate_datasets import irregular_gen, regular_gen, open_gen, wider_line_gen, scrambled_gen, random_color_gen, filled_gen, lines_gen, arrows_gen
 from tqdm import tqdm
 import matplotlib.pyplot as plt
