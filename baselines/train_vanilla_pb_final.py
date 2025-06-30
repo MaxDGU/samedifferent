@@ -9,8 +9,33 @@ import numpy as np
 from tqdm import tqdm
 
 from meta_baseline.models.conv6lr import SameDifferentCNN
-from baselines.models.utils import train_epoch, validate_epoch, EarlyStopping
+from baselines.models.utils import train_epoch, EarlyStopping
 from data.vanilla_h5 import VanillaPBDataset
+
+def validate_epoch(model, loader, criterion, device):
+    model.eval()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for data, labels in tqdm(loader, desc="Validation"):
+            data, labels = data.to(device), labels.to(device)
+            outputs = model(data)
+            if outputs.dim() > 1 and outputs.shape[1] > 1:
+                outputs = outputs[:, 1] - outputs[:, 0]
+            else:
+                outputs = outputs.squeeze()
+
+            loss = criterion(outputs, labels.float())
+            running_loss += loss.item()
+
+            predicted = (torch.sigmoid(outputs) > 0.5).long()
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+            
+    avg_loss = running_loss / len(loader)
+    accuracy = 100 * correct / total
+    return avg_loss, accuracy
 
 def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
