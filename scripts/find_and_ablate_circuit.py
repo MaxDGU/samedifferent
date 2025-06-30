@@ -19,7 +19,11 @@ from torch.utils.data import Dataset
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from meta_baseline.models.conv6lr import SameDifferentCNN
-from meta_baseline.models.utils_meta import collate_episodes
+# from meta_baseline.models.utils_meta import collate_episodes # This is buggy
+
+def custom_collate(batch):
+    """A simple collate function that returns the batch as a list of dicts."""
+    return batch
 
 class SameDifferentDataset(Dataset):
     def __init__(self, data_dir, tasks, split, support_sizes=[4, 6, 8, 10]):
@@ -198,8 +202,8 @@ def train(args):
     train_dataset = SameDifferentDataset(args.pb_data_dir, PB_TASKS, 'train', support_sizes=args.support_size)
     val_dataset = SameDifferentDataset(args.pb_data_dir, PB_TASKS, 'val', support_sizes=args.val_support_size)
     
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True, collate_fn=collate_episodes)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, collate_fn=collate_episodes)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True, collate_fn=custom_collate)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, collate_fn=custom_collate)
 
     # --- Model & MAML Setup ---
     model = SameDifferentCNN().to(device)
@@ -248,7 +252,7 @@ def find_circuit(args):
         'random_color', 'arrows', 'irregular', 'filled', 'original'
     ]
     val_dataset = SameDifferentDataset(args.pb_data_dir, PB_TASKS, 'val', support_sizes=args.val_support_size)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, collate_fn=collate_episodes)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, collate_fn=custom_collate)
 
     # --- Base Performance ---
     print("Calculating baseline performance without ablation...")
@@ -293,8 +297,8 @@ def train_ablated(args):
     train_dataset = SameDifferentDataset(args.pb_data_dir, PB_TASKS, 'train', support_sizes=args.support_size)
     val_dataset = SameDifferentDataset(args.pb_data_dir, PB_TASKS, 'val', support_sizes=args.val_support_size)
     
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True, collate_fn=collate_episodes)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, collate_fn=collate_episodes)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True, collate_fn=custom_collate)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, collate_fn=custom_collate)
 
     # --- Model & MAML Setup ---
     model = SameDifferentCNN().to(device)
