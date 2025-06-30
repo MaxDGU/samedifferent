@@ -208,8 +208,8 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
     num_meta_batches_processed = 0
     
     current_arch = args.architecture
-    if epoch_num == 0 and current_arch in ['conv4', 'conv6'] :
-        print_debug_stats("TrainEpochStart", current_arch, epoch_num, 0, maml_model=maml)
+    # if epoch_num == 0 and current_arch in ['conv4', 'conv6'] :
+    #     print_debug_stats("TrainEpochStart", current_arch, epoch_num, 0, maml_model=maml)
 
     pbar = tqdm(train_loader, desc=f'Epoch {epoch_num+1} Training')
     for meta_batch_idx, current_meta_batch_data in enumerate(pbar):
@@ -225,7 +225,7 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
 
         for task_idx in range(actual_meta_batch_size):
             learner = maml.clone()
-            print_debug_stats("LearnerCloned", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, learner=learner)
+            # print_debug_stats("LearnerCloned", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, learner=learner)
             
             support_images = current_meta_batch_data['support_images'][task_idx].to(device, non_blocking=True)
             support_labels = current_meta_batch_data['support_labels'][task_idx].to(device, non_blocking=True)
@@ -240,7 +240,7 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
                     support_loss = F.binary_cross_entropy_with_logits(
                         support_preds[:, 1], support_labels.float()
                     )
-                print_debug_stats("AdaptStepPreLoss", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, adapt_step=adapt_step, support_preds=support_preds, support_loss=support_loss, learner=learner)
+                # print_debug_stats("AdaptStepPreLoss", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, adapt_step=adapt_step, support_preds=support_preds, support_loss=support_loss, learner=learner)
                 
                 if torch.isnan(support_loss) or torch.isinf(support_loss):
                     print(f"CRITICAL: NaN/Inf support_loss detected. Arch: {current_arch}, E{epoch_num} B{meta_batch_idx} T{task_idx} AS{adapt_step}. Loss: {support_loss.item()}. Skipping adapt for this step and task.")
@@ -248,7 +248,7 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
                     break 
                 
                 learner.adapt(support_loss, allow_unused=True, allow_nograd=True)
-                print_debug_stats("AdaptStepPostAdapt", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, adapt_step=adapt_step, learner=learner)
+                # print_debug_stats("AdaptStepPostAdapt", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, adapt_step=adapt_step, learner=learner)
             
             if task_adaptation_failed:
                 # If adaptation failed for this task, we cannot evaluate it.
@@ -268,7 +268,7 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
                     query_loss_for_task = F.binary_cross_entropy_with_logits(
                         query_preds[:, 1], query_labels.float()
                     )
-                print_debug_stats("QueryPhase", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, query_preds=query_preds, query_loss=query_loss_for_task, learner=learner)
+                # print_debug_stats("QueryPhase", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, query_preds=query_preds, query_loss=query_loss_for_task, learner=learner)
 
                 if torch.isnan(query_loss_for_task) or torch.isinf(query_loss_for_task):
                     print(f"CRITICAL: NaN/Inf query_loss_for_task. Arch: {current_arch}, E{epoch_num} B{meta_batch_idx} T{task_idx}. Loss: {query_loss_for_task.item()}. Assigning high loss and 0 acc.")
@@ -281,40 +281,39 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
             sum_query_accs_for_meta_batch += acc
             # End of per-task processing in meta-batch
         
-        # Meta-update
-        meta_loss_for_batch = sum_query_losses_for_meta_batch / actual_meta_batch_size
-        meta_acc_for_batch = sum_query_accs_for_meta_batch / actual_meta_batch_size
+        # Average the meta-loss and meta-accuracy over the tasks in the meta-batch
+        if actual_meta_batch_size > 0:
+            meta_loss_for_batch = sum_query_losses_for_meta_batch / actual_meta_batch_size
+            meta_acc_for_batch = sum_query_accs_for_meta_batch / actual_meta_batch_size
+        else: # All tasks in meta-batch failed adaptation
+            print(f"CRITICAL: All {actual_meta_batch_size} tasks failed in meta-batch {meta_batch_idx}. Skipping backward pass for this batch.")
+            meta_loss_for_batch = None # Or some other indicator of failure
+            meta_acc_for_batch = torch.tensor(0.0)
 
-        if torch.isnan(meta_loss_for_batch) or torch.isinf(meta_loss_for_batch):
-            print(f"CRITICAL: NaN/Inf meta_loss_for_batch detected before backward. Arch: {current_arch}, E{epoch_num} B{meta_batch_idx}. Loss: {meta_loss_for_batch.item()}. Skipping batch.")
-            optimizer.zero_grad(set_to_none=True) 
-            del sum_query_losses_for_meta_batch, meta_loss_for_batch 
-            gc.collect()
-            torch.cuda.empty_cache() if device.type == 'cuda' else None
-            continue 
+        # --- Outer Loop Backward Pass ---
+        if meta_loss_for_batch is not None:
+            # print_debug_stats("PreOuterBackward", current_arch, epoch_num, meta_batch_idx, query_loss=meta_loss_for_batch, maml_model=maml)
+            
+            if scaler is not None:
+                scaler.scale(meta_loss_for_batch).backward()
+                if args.grad_clip_norm is not None:
+                    scaler.unscale_(optimizer) 
+                    torch.nn.utils.clip_grad_norm_(maml.parameters(), args.grad_clip_norm)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                meta_loss_for_batch.backward()
+                if args.grad_clip_norm is not None:
+                    torch.nn.utils.clip_grad_norm_(maml.parameters(), args.grad_clip_norm)
+                optimizer.step()
+            
+            # print_debug_stats("PostOptimizerStep", current_arch, epoch_num, meta_batch_idx, maml_model=maml)
 
-        print_debug_stats("PreOuterBackward", current_arch, epoch_num, meta_batch_idx, maml_model=maml, query_loss=meta_loss_for_batch)
-
-        if scaler:
-            scaler.scale(meta_loss_for_batch).backward()
-            if args.grad_clip_norm is not None:
-                scaler.unscale_(optimizer) 
-                torch.nn.utils.clip_grad_norm_(maml.parameters(), args.grad_clip_norm)
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            meta_loss_for_batch.backward()
-            if args.grad_clip_norm is not None:
-                torch.nn.utils.clip_grad_norm_(maml.parameters(), args.grad_clip_norm)
-            optimizer.step()
+            total_meta_loss += meta_loss_for_batch.item()
+            total_meta_acc += meta_acc_for_batch.item()
+            num_meta_batches_processed += 1
         
-        print_debug_stats("PostOptimizerStep", current_arch, epoch_num, meta_batch_idx, maml_model=maml)
-
-        total_meta_loss += meta_loss_for_batch.item()
-        total_meta_acc += meta_acc_for_batch # meta_acc_for_batch is already a float
-        num_meta_batches_processed += 1
-        
-        pbar.set_postfix(meta_loss=meta_loss_for_batch.item(), meta_acc=meta_acc_for_batch)
+        pbar.set_postfix(meta_loss=meta_loss_for_batch.item() if meta_loss_for_batch is not None else 'N/A', meta_acc=meta_acc_for_batch.item() if meta_acc_for_batch is not None else 'N/A')
 
     if num_meta_batches_processed == 0: # Handle case where all batches were skipped
         print("Warning: No meta-batches processed in this epoch.")
