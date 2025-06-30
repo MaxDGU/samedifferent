@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from meta_baseline.models.conv6lr import SameDifferentCNN
 from baselines.models.utils import train_epoch, EarlyStopping
-from data.vanilla_h5 import VanillaPBDataset
+from data.vanilla_h5_dataset_creation import PB_dataset_h5
 
 def validate_epoch(model, loader, criterion, device):
     model.eval()
@@ -70,9 +70,9 @@ def main(args):
         test_tasks = all_tasks
         print("Training on all available PB tasks. Using combined val/test splits from all tasks.")
 
-    train_datasets = [VanillaPBDataset(task=t, split='train', data_dir=args.data_dir) for t in train_tasks]
-    val_datasets = [VanillaPBDataset(task=t, split='val', data_dir=args.data_dir) for t in val_tasks]
-    test_datasets = [VanillaPBDataset(task=t, split='test', data_dir=args.data_dir) for t in test_tasks]
+    train_datasets = [PB_dataset_h5(task=t, split='train', data_dir=args.data_dir) for t in train_tasks]
+    val_datasets = [PB_dataset_h5(task=t, split='val', data_dir=args.data_dir) for t in val_tasks]
+    test_datasets = [PB_dataset_h5(task=t, split='test', data_dir=args.data_dir) for t in test_tasks]
     
     train_dataset = ConcatDataset(train_datasets)
     val_dataset = ConcatDataset(val_datasets)
