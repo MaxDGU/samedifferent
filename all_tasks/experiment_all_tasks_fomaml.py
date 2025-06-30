@@ -2,6 +2,7 @@
 import os
 import torch
 import torch.nn.functional as F
+import torch.nn as nn
 # Import from the 'meta_baseline.models' package
 from meta_baseline.models.conv2lr import SameDifferentCNN as Conv2CNN_lr
 from meta_baseline.models.conv4lr import SameDifferentCNN as Conv4CNN_lr
@@ -448,17 +449,17 @@ def main(args):
     # This property is set on BatchNorm2d layers within the model definition.
     # The args.track_running_stats_maml argument was intended to guide MAML behaviour,
     # but l2l.MAML handles BN differently based on model.train()/eval() modes.
-    model = model_constructor().to(device) 
-    
-    # Initialize weights (optional, but good practice)
-    for m_init in model.modules():
-        if isinstance(m_init, (torch.nn.Conv2d, torch.nn.Linear)):
-            torch.nn.init.kaiming_normal_(m_init.weight, mode='fan_out', nonlinearity='relu')
-            if m_init.bias is not None:
-                torch.nn.init.constant_(m_init.bias, 0)
-        elif isinstance(m_init, torch.nn.BatchNorm2d):
-            torch.nn.init.constant_(m_init.weight, 1)
-            torch.nn.init.constant_(m_init.bias, 0)
+    model = model_constructor().to(device)
+
+    # Add Kaiming Normal initialization (matches meta_baseline script)
+    for m in model.modules():
+        if isinstance(m, nn.Conv2d):
+            nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0.01)
+        elif isinstance(m, nn.BatchNorm2d):
+            nn.init.constant_(m.weight, 1)
+            nn.init.constant_(m.bias, 0.01)
 
     # Save initial model weights before wrapping with MAML
     torch.save(model.state_dict(), output_dir / 'initial_model.pth')
@@ -476,7 +477,7 @@ def main(args):
         first_order=args.first_order, 
         allow_unused=True, 
         allow_nograd=True,
-        track_running_stats=args.track_bn_stats # This is already correct
+        track_running_stats=args.track_running_stats_maml # This is already correct
     )
     maml.to(device)
     optimizer = torch.optim.AdamW(maml.parameters(), lr=args.outer_lr, weight_decay=args.weight_decay)
@@ -687,25 +688,27 @@ if __name__ == '__main__':
 
     # --- MAML specific ---
     parser.add_argument('--first_order', action='store_true', help='Use First-Order MAML (FOMAML). If not set, 2nd order MAML is used.')
-    parser.add_argument('--track_bn_stats', action=argparse.BooleanOptionalAction, default=True, help='Track batch norm running statistics in MAML. Default is True for l2l.MAML wrapper.')
+    parser.add_argument('--track_running_stats_maml', action='store_true', help='If set, MAML will use track_running_stats=True for BatchNorm layers.')
     
     # --- Meta-learning parameters ---
-    parser.add_argument('--meta_batch_size', type=int, default=16, help='Number of tasks per meta-update (meta-batch size).') # Adjusted default based on della_datapar
-    parser.add_argument('--inner_lr', type=float, default=0.001, help='Learning rate for inner loop adaptation (alpha).') # Matches della_datapar
-    parser.add_argument('--outer_lr', type=float, default=0.0001, help='Learning rate for outer loop meta-optimizer (beta).') # Matches della_datapar
-    parser.add_argument('--adaptation_steps_train', type=int, default=5, help='Number of adaptation steps for training (k_train).')
-    parser.add_argument('--adaptation_steps_val', type=int, default=15, help='Number of adaptation steps for validation (k_val).') # Matches della_datapar
-    parser.add_argument('--adaptation_steps_test', type=int, default=15, help='Number of adaptation steps for testing (k_test).') # Matches della_datapar
+    parser.add_argument('--meta_batch_size', type=int, default=8, help='Number of tasks per meta-batch.')
+    parser.add_argument('--inner_lr', type=float, default=0.05, help='Learning rate for the inner loop adaptation.')
+    parser.add_argument('--outer_lr', type=float, default=0.001, help='Learning rate for the outer loop.')
+    parser.add_argument('--adaptation_steps_train', type=int, default=5, help='Number of adaptation steps during the meta-training inner loop.')
+    parser.add_argument('--adaptation_steps_val', type=int, default=10, help='Number of adaptation steps during validation.')
+    parser.add_argument('--adaptation_steps_test', type=int, default=10, help='Number of adaptation steps during meta-testing.')
     
     # Note: VARIABLE_SUPPORT_SIZES and FIXED_QUERY_SIZE are hardcoded in the script for now.
     # These could be made into args if more flexibility is needed for HDF5 structure.
     # For testing phase:
-    parser.add_argument('--support_size_test', type=int, default=10, help='Number of support examples per task for FINAL TESTING (K_s_test).')
-    # parser.add_argument('--query_size_test', type=int, default=FIXED_QUERY_SIZE, help='Number of query examples per task for FINAL TESTING (K_q_test). Default is script FIXED_QUERY_SIZE.')
+    parser.add_argument('--support_size_test', type=int, default=10, help='Support size for the test set (if using a different one).')
+    # This argument is logged but does not affect data loading, which is determined by the HDF5 file structure.
+    # It is kept for compatibility with previous logs but should not be the source of truth for query size.
+    parser.add_argument('--query_size_test', type=int, default=2, help='Query size for the test set. (LOGGING ONLY)')
 
 
     # --- Training loop ---
-    parser.add_argument('--epochs', type=int, default=50, help='Number of meta-training epochs.') # Matches della_datapar
+    parser.add_argument('--epochs', type=int, default=100, help='Number of meta-training epochs.')
     parser.add_argument('--num_meta_batches_per_epoch', type=int, default=32, help='Number of meta-batches per training epoch.') # Matches MAML_NUM_ADAPTATION_SAMPLES in della_datapar
     parser.add_argument('--num_val_meta_batches', type=int, default=25, help='Number of meta-batches for a full validation pass.')
     parser.add_argument('--val_freq', type=int, default=1, help='Frequency (in epochs) to perform validation.')
@@ -714,7 +717,7 @@ if __name__ == '__main__':
     parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping.')
     parser.add_argument('--improvement_threshold', type=float, default=0.001, help='Minimum improvement in val_acc to reset patience.')
     parser.add_argument('--use_amp', action='store_true', help='Use Automatic Mixed Precision (AMP) for training if CUDA is available.')
-    parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for AdamW optimizer in outer loop.')
+    parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the outer loop optimizer.')
     parser.add_argument('--grad_clip_norm', type=float, default=None, help='Max norm for gradient clipping. Default is None (no clipping).')
 
 
@@ -724,8 +727,8 @@ if __name__ == '__main__':
     main_args = parser.parse_args()
     
     # Print effective track_running_stats setting
-    # This is now controlled by the track_bn_stats arg passed to l2l.MAML
-    print(f"l2l.MAML initialized with track_running_stats={main_args.track_bn_stats}")
+    # This is now controlled by the track_running_stats arg passed to l2l.MAML
+    print(f"l2l.MAML initialized with track_running_stats={main_args.track_running_stats_maml}")
 
     exit_code = 0 # Default to success
     try:
