@@ -8,9 +8,48 @@ import numpy as np
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import h5py
+from torch.utils.data import Dataset
 
 from meta_baseline.models.conv6lr import SameDifferentCNN
-from data.meta_data_generator_h5 import MetaDatasetGenerator
+
+class SameDifferentDataset(Dataset):
+    """
+    Dataset for loading PB same-different task data.
+    """
+    def __init__(self, data_dir, tasks, split, support_sizes=[10]):
+        self.data_dir = data_dir
+        self.tasks = tasks
+        self.split = split
+        self.support_sizes = support_sizes
+        self.episode_files = []
+        for task in tasks:
+            for support_size in support_sizes:
+                file_path = os.path.join(data_dir, f'{task}_support{support_size}_{split}.h5')
+                if os.path.exists(file_path):
+                    self.episode_files.append({'file_path': file_path, 'task': task, 'support_size': support_size})
+        if not self.episode_files: raise ValueError(f"No valid files found for tasks {tasks} in {data_dir}")
+        self.total_episodes, self.file_episode_counts = 0, []
+        for file_info in self.episode_files:
+            with h5py.File(file_info['file_path'], 'r') as f:
+                num_episodes = f['support_images'].shape[0]
+                self.file_episode_counts.append(num_episodes)
+                self.total_episodes += num_episodes
+
+    def __len__(self):
+        return self.total_episodes
+
+    def __getitem__(self, idx):
+        file_idx = 0
+        while idx >= self.file_episode_counts[file_idx]:
+            idx -= self.file_episode_counts[file_idx]
+            file_idx += 1
+        file_info = self.episode_files[file_idx]
+        with h5py.File(file_info['file_path'], 'r') as f:
+            support_images = torch.from_numpy(f['support_images'][idx]).float() / 255.0
+            support_labels = torch.from_numpy(f['support_labels'][idx]).long()
+        support_images = support_images.permute(0, 3, 1, 2)
+        return {'support_images': support_images, 'support_labels': support_labels, 'task': file_info['task']}
 
 def load_model(path, device):
     """Loads a model checkpoint."""
@@ -66,8 +105,8 @@ def adapt_model(model, data_loader, criterion, device, adaptation_steps=10, lr=0
             data_iter = iter(data_loader)
             batch = next(data_iter)
             
-        support_images = batch['support'][0].to(device)
-        support_labels = batch['support_labels'][0].to(device)
+        support_images = batch['support_images'].squeeze(0).to(device)
+        support_labels = batch['support_labels'].squeeze(0).to(device)
         
         optimizer.zero_grad()
         outputs = adapt_model(support_images)
@@ -104,13 +143,11 @@ def main(args):
 
     # --- Load Data for Adaptation ---
     print("\n--- Loading Adaptation Data (PB) ---")
-    # We use MetaPBDataset as it provides convenient support/query splits
-    pb_dataset = MetaDatasetGenerator(
+    pb_dataset = SameDifferentDataset(
         data_dir=args.data_dir,
-        task='all', 
+        tasks=['arrows', 'filled', 'irregular', 'lines', 'open', 'original', 'random_color', 'regular', 'scrambled', 'wider_line'],
         split='train',
-        support_size=10,
-        query_size=10
+        support_sizes=[10]
     )
     pb_loader = torch.utils.data.DataLoader(pb_dataset, batch_size=1, shuffle=True)
     criterion = nn.BCEWithLogitsLoss()
