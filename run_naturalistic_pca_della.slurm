@@ -20,6 +20,10 @@ conda activate tensorflow
 echo "Conda environment activated."
 echo "Current working directory: $(pwd)"
 
+# Set PYTHONPATH to include the project root
+export PYTHONPATH="/scratch/gpfs/mg7411/samedifferent:$PYTHONPATH"
+echo "PYTHONPATH set to: $PYTHONPATH"
+
 # --- Model Paths and Seeds ---
 META_SEED=111
 VANILLA_SEED=123
