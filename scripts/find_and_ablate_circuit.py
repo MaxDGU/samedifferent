@@ -12,12 +12,70 @@ import argparse
 import sys
 import gc
 import glob
+import h5py
+from torch.utils.data import Dataset
 
 # Add the root directory to the path to allow imports from other modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from meta_baseline.models.conv6lr import SameDifferentCNN
-from meta_baseline.models.utils_meta import SameDifferentDataset, collate_episodes
+from meta_baseline.models.utils_meta import collate_episodes
+
+class SameDifferentDataset(Dataset):
+    def __init__(self, data_dir, tasks, split, support_sizes=[4, 6, 8, 10]):
+        self.data_dir = data_dir
+        self.tasks = tasks
+        self.split = split
+        self.support_sizes = support_sizes
+        
+        self.episode_files = []
+        for task in tasks:
+            for support_size in support_sizes:
+                file_path = os.path.join(data_dir, f'{task}_support{support_size}_{split}.h5')
+                if os.path.exists(file_path):
+                    with h5py.File(file_path, 'r') as f:
+                        num_episodes = f['support_images'].shape[0]
+                        self.episode_files.append({
+                            'file_path': file_path,
+                            'task': task,
+                            'support_size': support_size,
+                            'num_episodes': num_episodes
+                        })
+        
+        if not self.episode_files:
+            raise ValueError(f"No valid files found for tasks {tasks} in {data_dir}")
+        
+        self.total_episodes = sum(f['num_episodes'] for f in self.episode_files)
+        print(f"\nDataset initialization for {split} split:")
+        print(f"Found {len(self.episode_files)} valid files, {self.total_episodes} total episodes.")
+
+    def __len__(self):
+        return self.total_episodes
+    
+    def __getitem__(self, idx):
+        file_idx = 0
+        while idx >= self.episode_files[file_idx]['num_episodes']:
+            idx -= self.episode_files[file_idx]['num_episodes']
+            file_idx += 1
+        
+        file_info = self.episode_files[file_idx]
+        
+        with h5py.File(file_info['file_path'], 'r') as f:
+            support_images = torch.from_numpy(f['support_images'][idx]).float()
+            support_labels = torch.from_numpy(f['support_labels'][idx]).long()
+            query_images = torch.from_numpy(f['query_images'][idx]).float()
+            query_labels = torch.from_numpy(f['query_labels'][idx]).long()
+        
+        support_images = (support_images.permute(0, 3, 1, 2) / 127.5) - 1.0
+        query_images = (query_images.permute(0, 3, 1, 2) / 127.5) - 1.0
+        
+        return {
+            'support_images': support_images,
+            'support_labels': support_labels.squeeze(),
+            'query_images': query_images,
+            'query_labels': query_labels.squeeze(),
+            'task': file_info['task'],
+        }
 
 def set_seed(seed):
     """Sets the seed for reproducibility."""
