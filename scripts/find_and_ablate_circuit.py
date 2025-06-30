@@ -131,8 +131,10 @@ def train(args):
     print(f"Using device: {device}")
     
     # --- Data Loading ---
-    PB_TASKS = [os.path.basename(p).replace('_support10_train.h5', '') 
-                for p in glob.glob(os.path.join(args.pb_data_dir, '*_train.h5'))]
+    PB_TASKS = [
+        'regular', 'lines', 'open', 'wider_line', 'scrambled',
+        'random_color', 'arrows', 'irregular', 'filled', 'original'
+    ]
 
     train_dataset = SameDifferentDataset(args.pb_data_dir, PB_TASKS, 'train', support_sizes=args.support_size)
     val_dataset = SameDifferentDataset(args.pb_data_dir, PB_TASKS, 'val', support_sizes=args.val_support_size)
@@ -182,8 +184,10 @@ def find_circuit(args):
     maml = l2l.algorithms.MAML(model, lr=args.fast_lr, first_order=False, allow_unused=True)
 
     # --- Data Loading for Validation ---
-    PB_TASKS = [os.path.basename(p).replace('_support10_train.h5', '') 
-                for p in glob.glob(os.path.join(args.pb_data_dir, '*_train.h5'))]
+    PB_TASKS = [
+        'regular', 'lines', 'open', 'wider_line', 'scrambled',
+        'random_color', 'arrows', 'irregular', 'filled', 'original'
+    ]
     val_dataset = SameDifferentDataset(args.pb_data_dir, PB_TASKS, 'val', support_sizes=args.val_support_size)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, collate_fn=collate_episodes)
 
@@ -222,8 +226,10 @@ def train_ablated(args):
     print(f"Permanently ablating channel: {args.channel_to_ablate}")
 
     # --- Data Loading ---
-    PB_TASKS = [os.path.basename(p).replace('_support10_train.h5', '') 
-                for p in glob.glob(os.path.join(args.pb_data_dir, '*_train.h5'))]
+    PB_TASKS = [
+        'regular', 'lines', 'open', 'wider_line', 'scrambled',
+        'random_color', 'arrows', 'irregular', 'filled', 'original'
+    ]
 
     train_dataset = SameDifferentDataset(args.pb_data_dir, PB_TASKS, 'train', support_sizes=args.support_size)
     val_dataset = SameDifferentDataset(args.pb_data_dir, PB_TASKS, 'val', support_sizes=args.val_support_size)
