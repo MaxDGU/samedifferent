@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 from meta_baseline.models.conv6lr import SameDifferentCNN
-from data.meta_h5 import MetaPBDataset
+from data.meta_data_generator_h5 import MetaDatasetGenerator
 
 def load_model(path, device):
     """Loads a model checkpoint."""
@@ -105,7 +105,7 @@ def main(args):
     # --- Load Data for Adaptation ---
     print("\n--- Loading Adaptation Data (PB) ---")
     # We use MetaPBDataset as it provides convenient support/query splits
-    pb_dataset = MetaPBDataset(
+    pb_dataset = MetaDatasetGenerator(
         data_dir=args.data_dir,
         task='all', 
         split='train',
