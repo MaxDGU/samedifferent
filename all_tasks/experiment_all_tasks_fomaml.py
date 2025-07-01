@@ -277,8 +277,11 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
                 else:
                     acc = accuracy(query_preds, query_labels)
             
-            sum_query_losses_for_meta_batch += query_loss_for_task
-            sum_query_accs_for_meta_batch += acc
+            if not torch.isnan(query_loss_for_task) and not torch.isinf(query_loss_for_task):
+                sum_query_losses_for_meta_batch += query_loss_for_task
+                sum_query_accs_for_meta_batch += acc.item()
+            else:
+                print(f"Warning: NaN/Inf query_loss detected for task {task_idx} in meta-batch {meta_batch_idx}. Skipping its contribution.")
             # End of per-task processing in meta-batch
         
         # Average the meta-loss and meta-accuracy over the tasks in the meta-batch
@@ -378,11 +381,11 @@ def validate_or_test(maml, dataloader, device, adaptation_steps, mode='Validatin
                     query_loss_for_task = F.binary_cross_entropy_with_logits(
                         query_preds[:, 1], query_labels.float()
                     )
-                    query_acc_for_task = accuracy(query_preds, query_labels.long())
+                    query_acc_for_task = accuracy(query_preds, query_labels)
                 
                 if not (torch.isnan(query_loss_for_task) or torch.isinf(query_loss_for_task)):
                     sum_query_losses_for_meta_batch += query_loss_for_task.item()
-                    sum_query_accs_for_meta_batch += query_acc_for_task.item() if isinstance(query_acc_for_task, torch.Tensor) else query_acc_for_task
+                    sum_query_accs_for_meta_batch += query_acc_for_task.item()
         
         if actual_meta_batch_size > 0 and num_meta_batches_processed < float('inf'): # check ensures at least one task processed
             avg_query_loss_for_meta_batch = sum_query_losses_for_meta_batch / actual_meta_batch_size
