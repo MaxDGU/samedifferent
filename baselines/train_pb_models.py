@@ -83,7 +83,7 @@ def main():
     # Training loop
     best_val_acc = 0
     training_history = []
-    early_stopping = EarlyStopping(patience=args.patience, min_delta=args.improvement_threshold)
+    early_stopping = EarlyStopping(patience=args.patience, verbose=True, path=os.path.join(model_dir, 'best_model.pt'))
     
     for epoch in range(args.epochs):
         print(f'\nEpoch {epoch+1}/{args.epochs}')
