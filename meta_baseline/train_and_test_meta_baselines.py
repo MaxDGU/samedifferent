@@ -163,7 +163,7 @@ def main():
                 torch.cuda.empty_cache()
                 gc.collect()
                 
-                val_loss, val_acc = validate(
+                val_loss, val_acc, _ = validate(
                     maml, val_loader, device,
                     args.adaptation_steps
                 )
