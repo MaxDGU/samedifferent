@@ -14,7 +14,7 @@ import torch.nn as nn
 from meta_baseline.models.conv2lr import SameDifferentCNN as Conv2CNN_lr
 from meta_baseline.models.conv4lr import SameDifferentCNN as Conv4CNN_lr
 from meta_baseline.models.conv6lr import SameDifferentCNN as Conv6CNN_lr
-from meta_baseline.models.utils_meta import SameDifferentDataset, accuracy, collate_episodes
+from meta_baseline.models.utils_meta import SameDifferentDataset, collate_episodes
 
 import learn2learn as l2l
 from torch.utils.data import DataLoader
@@ -44,6 +44,18 @@ ARCHITECTURES = {
 # Define support and query sizes for internal sampling
 VARIABLE_SUPPORT_SIZES = [4, 6, 8, 10]
 FIXED_QUERY_SIZE = 2
+
+def accuracy(predictions, targets):
+    """Binary classification accuracy using raw logits."""
+    with torch.no_grad():
+        # Compare raw logits to 0.0, not softmax probabilities to 0.5
+        predicted_labels = (predictions[:, 1] > 0.0).float()
+        
+        # Safely handle targets of different dimensions
+        if targets.dim() > 1:
+            targets = targets.squeeze(-1) # Squeeze the last dimension
+        
+        return (predicted_labels == targets).float().mean()
 
 # Helper function for printing model/learner stats
 ARGS_REF_FOR_PRINTING = None # Global to be set by main for easy access in helper
