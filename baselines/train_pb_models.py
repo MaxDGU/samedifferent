@@ -83,7 +83,7 @@ def main():
     # Training loop
     best_val_acc = 0
     training_history = []
-    early_stopping = EarlyStopping(patience=10, verbose=True, path=os.path.join(model_dir, 'best_model.pt'), delta=-0.01)
+    early_stopping = EarlyStopping(patience=10, verbose=True, path=os.path.join(model_dir, 'checkpoint.pt'), delta=-0.01)
     
     for epoch in range(args.epochs):
         print(f'\nEpoch {epoch+1}/{args.epochs}')
@@ -109,6 +109,13 @@ def main():
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
                 print(f'New best validation accuracy: {val_acc:.2f}%')
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'val_loss': val_loss,
+                    'val_acc': val_acc
+                }, os.path.join(model_dir, 'best_model.pt'))
             
             print(f'Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%')
             print(f'Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}%')
