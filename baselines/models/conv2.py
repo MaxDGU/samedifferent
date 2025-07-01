@@ -11,7 +11,7 @@ from PIL import Image
 from torchvision import transforms
 import json
 import argparse
-from .utils import train_epoch, validate, EarlyStopping, train_model, SameDifferentDataset
+from .utils import train_epoch, validate_epoch, EarlyStopping, SameDifferentDataset
 
 class SameDifferentCNN(nn.Module):
     def __init__(self, initial_kernel_size=2, initial_filters=6, dropout_rate_fc=0.3):
