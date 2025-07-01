@@ -11,11 +11,7 @@ from PIL import Image
 from torchvision import transforms
 import json
 import argparse
-import sys
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from baselines.models.utils import train_epoch, validate_epoch, EarlyStopping, SameDifferentDataset
+from .utils import train_epoch, validate, EarlyStopping, train_model, SameDifferentDataset
 
 class SameDifferentCNN(nn.Module):
     def __init__(self, initial_kernel_size=2, initial_filters=6, dropout_rate_fc=0.3):
@@ -100,27 +96,4 @@ class SameDifferentCNN(nn.Module):
         x = self.dropout2(F.relu(self.fc2(x)))
         x = self.dropout3(F.relu(self.fc3(x)))
         
-        return self.classifier(x)
-
-
-#main just to test...
-def main(args):
-    """Main entry point for training Conv2 model."""
-    args.dataset_class = SameDifferentDataset
-    # Assuming model needs dropout_rate_fc if provided, else uses default.
-    model_instance = SameDifferentCNN() # Default dropout for standalone test
-    if hasattr(args, 'dropout_rate_fc'):
-        model_instance = SameDifferentCNN(dropout_rate_fc=args.dropout_rate_fc)
-    
-    train_epoch(model_instance, args) # Pass model instance
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--task', type=str, required=True, help='SVRT task number')
-    parser.add_argument('--seed', type=int, required=True, help='Random seed')
-    parser.add_argument('--output_dir', type=str, required=True, help='Output directory')
-    parser.add_argument('--data_dir', type=str, required=True, help='Data directory')
-    args = parser.parse_args()
-    
-    print(f"\nStarting training for task {args.task} with seed {args.seed}")
-    main(args) 
+        return x

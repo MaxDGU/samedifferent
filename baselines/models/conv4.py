@@ -10,11 +10,7 @@ from PIL import Image
 from torchvision import transforms
 import json
 import argparse
-import sys
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from baselines.models.utils import train_epoch, validate_epoch, EarlyStopping, SameDifferentDataset
+from .utils import train_epoch, validate_epoch, EarlyStopping, SameDifferentDataset
 
 
 class SameDifferentCNN(nn.Module):
@@ -117,7 +113,7 @@ class SameDifferentCNN(nn.Module):
         x = self.dropout2(F.relu(self.fc2(x)))
         x = self.dropout3(F.relu(self.fc3(x)))
         
-        return self.classifier(x)
+        return x
 
 #main just to test...
 def main(args):
