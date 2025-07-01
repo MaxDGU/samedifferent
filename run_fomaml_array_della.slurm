@@ -12,7 +12,7 @@
 
 # Define the arrays for architectures and seeds
 ARCHS=('conv2' 'conv4' 'conv6')
-SEEDS=(42 123 555 789 999)
+SEEDS=(42 43 44 45 46)
 
 # Calculate the architecture and seed index from the SLURM array task ID
 NUM_SEEDS=${#SEEDS[@]}
@@ -48,6 +48,11 @@ python "${PROJECT_DIR}/all_tasks/experiment_all_tasks_fomaml.py" \
     --seed "$SEED" \
     --data_dir "$DATA_DIR" \
     --output_base_dir "$OUTPUT_BASE_DIR" \
-    --first_order
+    --first_order \
+    --meta_batch_size 32 \
+    --adaptation_steps_train 5 \
+    --adaptation_steps_val 5 \
+    --adaptation_steps_test 15 \
+    --patience 10
 
 echo "Job finished with exit code $?" 

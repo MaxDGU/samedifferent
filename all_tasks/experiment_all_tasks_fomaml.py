@@ -500,7 +500,7 @@ def main(args):
         allow_nograd=True
     )
     maml.to(device)
-    optimizer = torch.optim.AdamW(maml.parameters(), lr=args.outer_lr, weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam(maml.parameters(), lr=args.outer_lr)
     
     # AMP Scaler
     scaler = torch.cuda.amp.GradScaler() if use_cuda and args.use_amp else None
