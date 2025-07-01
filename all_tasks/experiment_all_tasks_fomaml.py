@@ -27,7 +27,6 @@ import argparse
 import copy
 import gc
 from pathlib import Path # For Path object operations
-from torch.utils.data import Sampler # For custom sampler
 
 # Define all possible tasks
 ALL_PB_TASKS = [
@@ -45,72 +44,12 @@ ARCHITECTURES = {
 VARIABLE_SUPPORT_SIZES = [4, 6, 8, 10]
 FIXED_QUERY_SIZE = 2
 
-# Helper function for printing model/learner stats
-ARGS_REF_FOR_PRINTING = None # Global to be set by main for easy access in helper
-
-def print_debug_stats(tag, arch, epoch, meta_batch_idx, task_idx=None, adapt_step=None, learner=None, maml_model=None, support_preds=None, support_loss=None, query_preds=None, query_loss=None):
-    if ARGS_REF_FOR_PRINTING is None or ARGS_REF_FOR_PRINTING.architecture not in ['conv4', 'conv6']:
-        return
-    if epoch > 0 or meta_batch_idx > 1 : # Limit prints to first epoch, first 2 meta-batches
-        return
-
-    prefix = f"DEBUG [{arch} E{epoch} B{meta_batch_idx}"
-    if task_idx is not None:
-        prefix += f" T{task_idx}"
-    if adapt_step is not None:
-        prefix += f" AS{adapt_step}"
-    prefix += f"] {tag}:"
-
-    print(prefix)
-    if support_preds is not None:
-        print(f"  Support Preds: min={support_preds.min().item():.3e}, max={support_preds.max().item():.3e}, mean_abs={support_preds.abs().mean().item():.3e}, has_nan={torch.isnan(support_preds).any().item()}")
-    if support_loss is not None:
-        print(f"  Support Loss: {support_loss.item() if isinstance(support_loss, torch.Tensor) else support_loss:.4e}, is_nan={torch.isnan(support_loss).any().item() if isinstance(support_loss, torch.Tensor) else 'N/A'}")
-    if query_preds is not None:
-        print(f"  Query Preds: min={query_preds.min().item():.3e}, max={query_preds.max().item():.3e}, mean_abs={query_preds.abs().mean().item():.3e}, has_nan={torch.isnan(query_preds).any().item()}")
-    if query_loss is not None:
-        print(f"  Query Loss: {query_loss.item() if isinstance(query_loss, torch.Tensor) else query_loss:.4e}, is_nan={torch.isnan(query_loss).any().item() if isinstance(query_loss, torch.Tensor) else 'N/A'}")
-
-    model_to_inspect = learner if learner is not None else maml_model
-    if model_to_inspect:
-        try:
-            if hasattr(model_to_inspect.module, 'conv1') and model_to_inspect.module.conv1.weight is not None:
-                c1w_abs_mean = model_to_inspect.module.conv1.weight.data.abs().mean().item()
-                c1g_abs_mean = 'NoGrad'
-                if model_to_inspect.module.conv1.weight.grad is not None:
-                    c1g_abs_mean = model_to_inspect.module.conv1.weight.grad.abs().mean().item()
-                print(f"  Conv1: w_abs_mean={c1w_abs_mean:.3e}, g_abs_mean={c1g_abs_mean if isinstance(c1g_abs_mean, str) else f'{c1g_abs_mean:.3e}'}")
-
-            if hasattr(model_to_inspect.module, 'classifier') and model_to_inspect.module.classifier.weight is not None:
-                clw_abs_mean = model_to_inspect.module.classifier.weight.data.abs().mean().item()
-                clg_abs_mean = 'NoGrad'
-                if model_to_inspect.module.classifier.weight.grad is not None:
-                    clg_abs_mean = model_to_inspect.module.classifier.weight.grad.abs().mean().item()
-                print(f"  Classifier: w_abs_mean={clw_abs_mean:.3e}, g_abs_mean={clg_abs_mean if isinstance(clg_abs_mean, str) else f'{clg_abs_mean:.3e}'}")
-            
-            total_weight_sum = sum(p.data.abs().sum().item() for p in model_to_inspect.parameters() if p.requires_grad and p.data is not None)
-            print(f"  Total W Abs Sum: {total_weight_sum:.3e}")
-            if maml_model is None: # Grads are on the main maml model after outer backward, not on learner
-                 total_grad_sum = sum(p.grad.abs().sum().item() for p in model_to_inspect.parameters() if p.grad is not None and p.requires_grad)
-                 print(f"  Total G Abs Sum (Learner): {total_grad_sum:.3e}")
-
-
-        except AttributeError as e:
-            print(f"  Error accessing model attributes for stats: {e}")
-    if maml_model and tag in ["PostOuterBackward", "PostOptimizerStep"]: # Grads are on main MAML model
-        total_grad_sum_main = sum(p.grad.abs().sum().item() for p in maml_model.parameters() if p.grad is not None and p.requires_grad)
-        print(f"  Total G Abs Sum (MAML model): {total_grad_sum_main:.3e}")
-
 
 def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler, epoch_num, args):
     maml.train()
     total_meta_loss = 0
     total_meta_acc = 0
     num_meta_batches_processed = 0
-    
-    current_arch = args.architecture
-    # if epoch_num == 0 and current_arch in ['conv4', 'conv6'] :
-    #     print_debug_stats("TrainEpochStart", current_arch, epoch_num, 0, maml_model=maml)
 
     pbar = tqdm(train_loader, desc=f'Epoch {epoch_num+1} Training')
     for meta_batch_idx, current_meta_batch_data in enumerate(pbar):
@@ -118,6 +57,7 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
         
         sum_query_losses_for_meta_batch = 0.0
         sum_query_accs_for_meta_batch = 0.0
+        num_successful_tasks = 0
         
         actual_meta_batch_size = current_meta_batch_data['support_images'].size(0)
         if actual_meta_batch_size == 0:
@@ -126,7 +66,6 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
 
         for task_idx in range(actual_meta_batch_size):
             learner = maml.clone()
-            # print_debug_stats("LearnerCloned", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, learner=learner)
             
             support_images = current_meta_batch_data['support_images'][task_idx].to(device, non_blocking=True)
             support_labels = current_meta_batch_data['support_labels'][task_idx].to(device, non_blocking=True)
@@ -141,67 +80,46 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
                     support_loss = F.binary_cross_entropy_with_logits(
                         support_preds[:, 1], support_labels.float()
                     )
-                # print_debug_stats("AdaptStepPreLoss", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, adapt_step=adapt_step, support_preds=support_preds, support_loss=support_loss, learner=learner)
                 
                 if torch.isnan(support_loss) or torch.isinf(support_loss):
-                    print(f"CRITICAL: NaN/Inf support_loss detected. Arch: {current_arch}, E{epoch_num} B{meta_batch_idx} T{task_idx} AS{adapt_step}. Loss: {support_loss.item()}. Skipping adapt for this step and task.")
+                    print(f"CRITICAL: NaN/Inf support_loss detected. Arch: {args.architecture}, E{epoch_num} B{meta_batch_idx} T{task_idx} AS{adapt_step}. Loss: {support_loss.item()}. Skipping adapt for this step and task.")
                     task_adaptation_failed = True
                     break 
                 
                 learner.adapt(support_loss, allow_unused=True, allow_nograd=True)
-                # print_debug_stats("AdaptStepPostAdapt", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, adapt_step=adapt_step, learner=learner)
             
             if task_adaptation_failed:
-                # If adaptation failed for this task, we cannot evaluate it.
-                # We'll add a very high loss and zero accuracy for this task to penalize,
-                # or simply skip its contribution to the meta-loss.
-                # For now, let's skip its contribution to avoid NaNs in meta-loss if we assigned a fixed large loss.
-                # Effective meta_batch_size for averaging will be smaller if tasks fail.
-                # This needs careful consideration: should a failed task contribute a max loss or be ignored?
-                # Ignoring it might be too lenient. Let's add a large loss and 0 acc to make it count.
-                print(f"Warning: Task {task_idx} adaptation failed. Assigning high loss and 0 acc.")
-                query_loss_for_task = torch.tensor(100.0, device=device) # Arbitrary large loss
-                query_acc_for_task = 0.0
-            else: 
-                # Evaluation Phase (Query Set)
-                with torch.amp.autocast(device_type=device.type, enabled=scaler is not None):
-                    query_preds = learner(query_images)
-                    query_loss_for_task = F.binary_cross_entropy_with_logits(
-                        query_preds[:, 1], query_labels.float()
-                    )
-                # print_debug_stats("QueryPhase", current_arch, epoch_num, meta_batch_idx, task_idx=task_idx, query_preds=query_preds, query_loss=query_loss_for_task, learner=learner)
+                continue
 
-                if torch.isnan(query_loss_for_task) or torch.isinf(query_loss_for_task):
-                    print(f"CRITICAL: NaN/Inf query_loss_for_task. Arch: {current_arch}, E{epoch_num} B{meta_batch_idx} T{task_idx}. Loss: {query_loss_for_task.item()}. Assigning high loss and 0 acc.")
-                    query_loss_for_task = torch.tensor(100.0, device=device) # Arbitrary large loss
-                    query_acc_for_task = 0.0
-                else:
-                    query_acc_for_task = accuracy(query_preds, query_labels)
-            
+            # Evaluation Phase
+            with torch.no_grad():
+                query_preds = learner(query_images)
+                query_loss_for_task = F.binary_cross_entropy_with_logits(
+                    query_preds[:, 1], query_labels.float()
+                )
+                query_acc_for_task = accuracy(query_preds, query_labels)
+
             if not torch.isnan(query_loss_for_task) and not torch.isinf(query_loss_for_task):
                 sum_query_losses_for_meta_batch += query_loss_for_task
                 sum_query_accs_for_meta_batch += query_acc_for_task.item()
+                num_successful_tasks += 1
             else:
                 print(f"Warning: NaN/Inf query_loss detected for task {task_idx} in meta-batch {meta_batch_idx}. Skipping its contribution.")
-            # End of per-task processing in meta-batch
-        
+
         # Average the meta-loss and meta-accuracy over the tasks in the meta-batch
-        if actual_meta_batch_size > 0:
-            meta_loss_for_batch = sum_query_losses_for_meta_batch / actual_meta_batch_size
-            meta_acc_for_batch = sum_query_accs_for_meta_batch / actual_meta_batch_size
-        else: # All tasks in meta-batch failed adaptation
+        if num_successful_tasks > 0:
+            meta_loss_for_batch = sum_query_losses_for_meta_batch / num_successful_tasks
+            meta_acc_for_batch = sum_query_accs_for_meta_batch / num_successful_tasks
+        else: 
             print(f"CRITICAL: All {actual_meta_batch_size} tasks failed in meta-batch {meta_batch_idx}. Skipping backward pass for this batch.")
-            meta_loss_for_batch = None # Or some other indicator of failure
-            meta_acc_for_batch = torch.tensor(0.0)
+            meta_loss_for_batch = None
+            meta_acc_for_batch = 0.0
 
         # --- Outer Loop Backward Pass ---
         if meta_loss_for_batch is not None:
-            # print_debug_stats("PreOuterBackward", current_arch, epoch_num, meta_batch_idx, query_loss=meta_loss_for_batch, maml_model=maml)
-            
             if scaler is not None:
                 scaler.scale(meta_loss_for_batch).backward()
                 if args.grad_clip_norm is not None:
-                    scaler.unscale_(optimizer) 
                     torch.nn.utils.clip_grad_norm_(maml.parameters(), args.grad_clip_norm)
                 scaler.step(optimizer)
                 scaler.update()
@@ -211,100 +129,92 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
                     torch.nn.utils.clip_grad_norm_(maml.parameters(), args.grad_clip_norm)
                 optimizer.step()
             
-            # print_debug_stats("PostOptimizerStep", current_arch, epoch_num, meta_batch_idx, maml_model=maml)
-
             total_meta_loss += meta_loss_for_batch.item()
             total_meta_acc += meta_acc_for_batch
             num_meta_batches_processed += 1
         
         pbar.set_postfix(meta_loss=meta_loss_for_batch.item() if meta_loss_for_batch is not None else 'N/A', meta_acc=meta_acc_for_batch if meta_acc_for_batch is not None else 'N/A')
 
-    if num_meta_batches_processed == 0: # Handle case where all batches were skipped
-        print("Warning: No meta-batches processed in this epoch.")
-        return 0.0, 0.0 
-        
+    if num_meta_batches_processed == 0:
+        print("Warning: No batches were successfully processed in this epoch.")
+        return 0.0, 0.0
+    
     avg_meta_loss = total_meta_loss / num_meta_batches_processed
     avg_meta_acc = total_meta_acc / num_meta_batches_processed
     return avg_meta_loss, avg_meta_acc
 
+
 def validate_or_test(maml, dataloader, device, adaptation_steps, mode='Validating', epoch_num=None, test_task_name=None):
     maml.eval()
-    total_meta_loss = 0
-    total_meta_acc = 0
-    num_meta_batches_processed = 0
+    total_loss = 0.0
+    total_acc = 0.0
+    num_processed_batches = 0
+    
+    task_accuracies = {task: [] for task in ALL_PB_TASKS}
+    task_losses = {task: [] for task in ALL_PB_TASKS}
 
-    desc_str = mode
-    if epoch_num is not None:
-        desc_str = f'Epoch {epoch_num+1} {mode}'
-    if test_task_name:
-        desc_str = f'{mode} on {test_task_name}'
+    desc = f"Epoch {epoch_num+1} {mode}" if epoch_num is not None else mode
+    pbar = tqdm(dataloader, desc=desc)
+    
+    for batch_idx, current_meta_batch_data in enumerate(pbar):
+        support_images = current_meta_batch_data['support_images'].to(device, non_blocking=True)
+        support_labels = current_meta_batch_data['support_labels'].to(device, non_blocking=True)
+        query_images = current_meta_batch_data['query_images'].to(device, non_blocking=True)
+        query_labels = current_meta_batch_data['query_labels'].to(device, non_blocking=True)
+        tasks_in_batch = current_meta_batch_data['task']
         
-    pbar = tqdm(dataloader, desc=desc_str)
-    for current_meta_batch_data in pbar:
-        sum_query_losses_for_meta_batch = 0.0
-        sum_query_accs_for_meta_batch = 0.0
-        
-        actual_meta_batch_size = current_meta_batch_data['support_images'].size(0)
-        if actual_meta_batch_size == 0:
-            continue
+        actual_meta_batch_size = support_images.size(0)
 
         for task_idx in range(actual_meta_batch_size):
             learner = maml.clone()
             
-            # For testing, we often want batch norm to be in training mode during adaptation
-            # and eval mode during query evaluation on the test task.
-            # For validation during meta-training, maml itself is eval, so BN uses running stats.
-            if mode == 'Testing':
-                learner.train() # Enable train mode for adaptation to update BN stats for this task.
-            # else, learner inherits maml.training status (which is False/eval)
+            # Adaptation
+            for step in range(adaptation_steps):
+                preds = learner(support_images[task_idx])
+                loss = F.binary_cross_entropy_with_logits(preds[:, 1], support_labels[task_idx].float())
+                if not (torch.isnan(loss) or torch.isinf(loss)):
+                    learner.adapt(loss, allow_unused=True, allow_nograd=True)
 
-            support_images = current_meta_batch_data['support_images'][task_idx].to(device, non_blocking=True)
-            support_labels = current_meta_batch_data['support_labels'][task_idx].to(device, non_blocking=True)
-            query_images = current_meta_batch_data['query_images'][task_idx].to(device, non_blocking=True)
-            query_labels = current_meta_batch_data['query_labels'][task_idx].to(device, non_blocking=True)
-            
-            # Inner loop: adaptation
-            for _ in range(adaptation_steps):
-                support_preds = learner(support_images)
-                support_loss = F.binary_cross_entropy_with_logits(
-                    support_preds[:, 1], support_labels.float()
+            # Evaluation
+            with torch.no_grad():
+                query_preds = learner(query_images[task_idx])
+                query_loss = F.binary_cross_entropy_with_logits(
+                    query_preds[:, 1], query_labels[task_idx].float()
                 )
-                if torch.isnan(support_loss) or torch.isinf(support_loss):
-                    print(f"Warning: NaN/Inf support_loss during {mode} adaptation. Skipping adapt for this step.")
-                    break
-                learner.adapt(support_loss, allow_unused=True, allow_nograd=True) # allow_unused=True
-            else: # Continue if adaptation completed
-                if mode == 'Testing':
-                    learner.eval() # Switch to eval mode for query evaluation using adapted BN stats.
-                
-                with torch.no_grad():
-                    query_preds = learner(query_images)
-                    query_loss_for_task = F.binary_cross_entropy_with_logits(
-                        query_preds[:, 1], query_labels.float()
-                    )
-                    query_acc_for_task = accuracy(query_preds, query_labels)
-                
-                if not (torch.isnan(query_loss_for_task) or torch.isinf(query_loss_for_task)):
-                    sum_query_losses_for_meta_batch += query_loss_for_task.item()
-                    sum_query_accs_for_meta_batch += query_acc_for_task.item()
-        
-        if actual_meta_batch_size > 0 and num_meta_batches_processed < float('inf'): # check ensures at least one task processed
-            avg_query_loss_for_meta_batch = sum_query_losses_for_meta_batch / actual_meta_batch_size
-            avg_query_acc_for_meta_batch = sum_query_accs_for_meta_batch / actual_meta_batch_size
-            
-            total_meta_loss += avg_query_loss_for_meta_batch
-            total_meta_acc += avg_query_acc_for_meta_batch
-            num_meta_batches_processed += 1
-        
-        pbar.set_postfix({
-            'loss': f'{total_meta_loss / num_meta_batches_processed:.4f}' if num_meta_batches_processed > 0 else 'N/A',
-            'acc': f'{total_meta_acc / num_meta_batches_processed:.4f}' if num_meta_batches_processed > 0 else 'N/A'
-        })
+                query_acc = accuracy(query_preds, query_labels[task_idx])
 
-    if num_meta_batches_processed == 0:
-        print(f"Warning: {mode} phase completed with no meta-batches processed successfully.")
-        return 0.0, 0.0
-    return total_meta_loss / num_meta_batches_processed, total_meta_acc / num_meta_batches_processed
+            # Accumulate metrics for the batch
+            if not (torch.isnan(query_loss) or torch.isinf(query_loss)):
+                total_loss += query_loss.item()
+                total_acc += query_acc.item()
+                num_processed_batches += 1
+
+                if mode == 'Testing':
+                    task_name = tasks_in_batch[task_idx]
+                    task_losses[task_name].append(query_loss.item())
+                    task_accuracies[task_name].append(query_acc.item())
+
+        pbar.set_postfix(loss=total_loss/num_processed_batches if num_processed_batches > 0 else 0, acc=total_acc/num_processed_batches if num_processed_batches > 0 else 0)
+
+    if num_processed_batches == 0:
+        print(f"Warning: No batches were successfully processed during {mode}.")
+        return (0.0, 0.0) if mode != 'Testing' else (0.0, 0.0, {})
+
+    avg_loss = total_loss / num_processed_batches
+    avg_acc = total_acc / num_processed_batches
+    
+    if mode == 'Testing':
+        final_task_metrics = {}
+        for task in ALL_PB_TASKS:
+            if task_losses[task]:
+                final_task_metrics[task] = {
+                    'loss': np.mean(task_losses[task]),
+                    'accuracy': np.mean(task_accuracies[task])
+                }
+        return avg_loss, avg_acc, final_task_metrics
+    
+    return avg_loss, avg_acc
+
 
 def set_seed(seed, device_type):
     random.seed(seed)
@@ -312,53 +222,48 @@ def set_seed(seed, device_type):
     torch.manual_seed(seed)
     if device_type == 'cuda':
         torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed) # For multi-GPU
-        # For speed, if input sizes are consistent (common in MAML episodes)
-        torch.backends.cudnn.benchmark = True
-        # For full reproducibility, set deterministic = True. This might impact performance.
-        # Choose one or the other based on priority.
-        torch.backends.cudnn.deterministic = False 
-    else: # For CPU or other devices
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = True # Keep deterministic for non-CUDA for consistency if desired
 
 
 def main(args):
-    global ARGS_REF_FOR_PRINTING
-    ARGS_REF_FOR_PRINTING = args # Set for helper function
-
-    # Determine device
-    use_cuda = torch.cuda.is_available() and not args.force_cpu
-    device = torch.device('cuda' if use_cuda else 'cpu')
-    print(f"Using device: {device}")
-
+    use_cuda = not args.force_cpu and torch.cuda.is_available()
+    device = torch.device("cuda" if use_cuda else "cpu")
     set_seed(args.seed, device.type)
 
-    # --- Output Directory Setup ---
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # Experiment name reflects variable S and fixed Q (implicitly Q=2)
-    exp_name = f"exp_all_tasks_fomaml_{args.architecture}_seed{args.seed}_Svar_Q{FIXED_QUERY_SIZE}_{timestamp}"
+    # --- Directories and Files ---
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    # Use Svar_Q2 to denote the fixed query size from the data
+    exp_name = f"exp_all_tasks_fomaml_{args.architecture}_seed{args.seed}_Svar_Q2_{timestamp}"
     output_dir = Path(args.output_base_dir) / exp_name
     output_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Results will be saved to: {output_dir}")
-
-    # Save arguments
-    with open(output_dir / 'args.json', 'w') as f:
-        # Add VARIABLE_SUPPORT_SIZES and FIXED_QUERY_SIZE to saved args for clarity
-        args_to_save = vars(copy.deepcopy(args))
-        args_to_save['variable_support_sizes_used'] = VARIABLE_SUPPORT_SIZES
-        args_to_save['fixed_query_size_used'] = FIXED_QUERY_SIZE
-        json.dump(args_to_save, f, indent=4)
-
-    # --- Model Selection ---
-    model_constructor = ARCHITECTURES.get(args.architecture)
-    if model_constructor is None:
-        raise ValueError(f"Unsupported architecture: {args.architecture}")
     
-    # model_constructor constructor (e.g., Conv2CNN_lr) does not take track_running_stats directly.
-    # This property is set on BatchNorm2d layers within the model definition.
-    # The args.track_running_stats_maml argument was intended to guide MAML behaviour,
-    # but l2l.MAML handles BN differently based on model.train()/eval() modes.
+    # --- Datasets ---
+    train_dataset = SameDifferentDataset(args.data_dir, ALL_PB_TASKS, split='train', support_sizes=VARIABLE_SUPPORT_SIZES)
+    val_dataset = SameDifferentDataset(args.data_dir, ALL_PB_TASKS, split='val', support_sizes=VARIABLE_SUPPORT_SIZES)
+
+    # --- Dataloaders ---
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=args.meta_batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+        pin_memory=True
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=args.meta_batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=True
+    )
+    
+    print(f"Train loader size: {len(train_loader)} batches")
+    print(f"Validation loader size: {len(val_loader)} batches")
+    
+    # --- Model, MAML, Optimizer ---
+    model_constructor = ARCHITECTURES[args.architecture]
     model = model_constructor().to(device)
 
     # Add Kaiming Normal initialization (matches meta_baseline script)
@@ -371,222 +276,108 @@ def main(args):
             nn.init.constant_(m.weight, 1)
             nn.init.constant_(m.bias, 0.01)
 
-    # Save initial model weights before wrapping with MAML
-    torch.save(model.state_dict(), output_dir / 'initial_model.pth')
-    print(f"Saved initial model weights to {output_dir / 'initial_model.pth'}")
-
-    effective_inner_lr = args.inner_lr # Use the inner_lr passed from run_all_tasks_pb.py directly
-    # # Adjust inner_lr for deeper architectures if prone to instability - REMOVED THIS BLOCK
-    # if args.architecture in ['conv4', 'conv6']:
-    #     effective_inner_lr = 0.001  # Reduced inner LR for conv4/conv6
-    #     print(f"INFO: Using reduced inner_lr for {args.architecture}: {effective_inner_lr} (original CLI arg was {args.inner_lr})")
-
+    # Wrap model with MAML
     maml = l2l.algorithms.MAML(
         model,
-        lr=effective_inner_lr,
+        lr=args.inner_lr,
         first_order=args.first_order,
         allow_unused=True, 
         allow_nograd=True
     )
     maml.to(device)
-    optimizer = torch.optim.AdamW(maml.parameters(), lr=args.outer_lr, weight_decay=args.weight_decay)
+
+    # Setup optimizer
+    optimizer = torch.optim.Adam(maml.parameters(), lr=args.outer_lr, weight_decay=args.weight_decay)
     
-    # AMP Scaler
-    scaler = torch.cuda.amp.GradScaler() if use_cuda and args.use_amp else None
-    if scaler: print("Using Automatic Mixed Precision (AMP).")
-
-    # --- Datasets and DataLoaders ---
-    train_task_names = ALL_PB_TASKS
-    val_task_names = ALL_PB_TASKS
-
-    print(f"Meta-training on tasks: {train_task_names} with variable support sizes: {VARIABLE_SUPPORT_SIZES}, query size: {FIXED_QUERY_SIZE}")
-    print(f"Meta-validating on tasks: {val_task_names} with variable support sizes: {VARIABLE_SUPPORT_SIZES}, query size: {FIXED_QUERY_SIZE}")
-
-    # Instantiate dataset with ALL desired support sizes
-    # SameDifferentDataset constructor takes `support_sizes` (plural)
-    train_dataset = SameDifferentDataset(
-        data_dir=args.data_dir,
-        tasks=train_task_names,
-        split='train',
-        support_sizes=VARIABLE_SUPPORT_SIZES, # Pass the list of S sizes
-    )
-    val_dataset = SameDifferentDataset(
-        data_dir=args.data_dir,
-        tasks=val_task_names,
-        split='val',
-        support_sizes=VARIABLE_SUPPORT_SIZES, # Pass the list of S sizes
-    )
-
-    # --- Dataloaders ---
-    # Note: The 'collate_episodes' function from utils_meta is not used here,
-    # as the default collate function is sufficient for this dataset structure.
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=args.meta_batch_size,
-        shuffle=True,
-        num_workers=args.num_workers,
-        pin_memory=True
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=args.meta_batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=True
-    )
-
-    print(f"Train loader size: {len(train_loader)} batches")
-    print(f"Validation loader size: {len(val_loader)} batches")
+    # Setup Automatic Mixed Precision
+    scaler = torch.cuda.amp.GradScaler() if args.use_amp and use_cuda else None
     
     # --- Training Loop ---
-    best_val_acc = -1.0
-    best_val_loss = float('inf')
+    best_val_acc = 0
     patience_counter = 0
-    
     metrics_history = []
-
+    
     for epoch in range(args.epochs):
-        epoch_metrics = {'epoch': epoch + 1}
-        
         train_loss, train_acc = train_epoch(maml, train_loader, optimizer, device, args.adaptation_steps_train, scaler, epoch, args)
-        epoch_metrics['train_loss'] = train_loss
-        epoch_metrics['train_acc'] = train_acc
-        print(f"Epoch {epoch+1}/{args.epochs} Summary: Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
-
-        if (epoch + 1) % args.val_freq == 0 or epoch == args.epochs - 1:
+        
+        if (epoch + 1) % args.val_freq == 0:
             val_loss, val_acc = validate_or_test(maml, val_loader, device, args.adaptation_steps_val, mode='Validating', epoch_num=epoch)
-            epoch_metrics['val_loss'] = val_loss
-            epoch_metrics['val_acc'] = val_acc
+            
+            print(f"Epoch {epoch+1}/{args.epochs} Summary: Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
             print(f"Epoch {epoch+1}/{args.epochs}          Val Loss: {val_loss:.4f},   Val Acc: {val_acc:.4f}")
+
+            metrics_history.append({
+                'epoch': epoch + 1,
+                'train_loss': train_loss, 'train_acc': train_acc,
+                'val_loss': val_loss, 'val_acc': val_acc
+            })
 
             if val_acc > best_val_acc + args.improvement_threshold:
                 best_val_acc = val_acc
-                best_val_loss = val_loss
                 patience_counter = 0
-                # Save best model based on validation accuracy
-                checkpoint = {
-                    'epoch': epoch + 1,
-                    'model_state_dict': model.state_dict(), # Save underlying model's state
-                    'maml_state_dict': maml.state_dict(),   # Save MAML wrapper's state
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'val_acc': val_acc,
-                    'val_loss': val_loss,
-                    'train_acc': train_acc,
-                    'train_loss': train_loss,
-                    'args': vars(args)
-                }
-                torch.save(checkpoint, output_dir / 'best_model.pth')
+                torch.save(maml.state_dict(), output_dir / 'best_model.pth')
                 print(f"Epoch {epoch+1}: New best model saved with Val Acc: {val_acc:.4f}")
             else:
                 patience_counter += 1
-        
-        metrics_history.append(epoch_metrics)
-        with open(output_dir / 'metrics_history.json', 'w') as f_metrics:
-            json.dump(metrics_history, f_metrics, indent=4)
+                if patience_counter >= args.patience:
+                    print(f"Early stopping triggered after epoch {epoch+1}. No improvement > {args.improvement_threshold} for {args.patience} validations.")
+                    break
+        else:
+             metrics_history.append({
+                'epoch': epoch + 1,
+                'train_loss': train_loss, 'train_acc': train_acc,
+                'val_loss': None, 'val_acc': None
+            })
 
-        if patience_counter >= args.patience:
-            print(f"Early stopping triggered at epoch {epoch+1} due to no improvement in val_acc for {args.patience} validation cycles.")
-            break
-        
-        # Clear CUDA cache
-        if use_cuda:
-            torch.cuda.empty_cache()
-        gc.collect()
-
-    print("Meta-training finished.")
-
-    # --- Testing Phase ---
-    print("Loading best model for testing...")
-    try:
-        checkpoint = torch.load(output_dir / 'best_model.pth', map_location=device)
-        # Load model state into the original model, then potentially re-wrap with MAML if needed for test_model
-        # Or, ensure maml object (if used by test_model) is loaded with its state
-        model.load_state_dict(checkpoint['model_state_dict'])
-        maml.load_state_dict(checkpoint['maml_state_dict']) # Ensure MAML specific state is also loaded
-        print(f"Best model from epoch {checkpoint.get('epoch', 'N/A')} loaded with Val Acc: {checkpoint.get('val_acc', 'N/A'):.4f}")
-    except FileNotFoundError:
-        print("ERROR: Best model checkpoint ('best_model.pth') not found. Testing will use the last state of the model.")
-        # Potentially save the last model state here if desired, or just proceed.
-        torch.save({
-            'epoch': epoch + 1 if 'epoch' in locals() else args.epochs, # last completed epoch or total epochs
-            'model_state_dict': model.state_dict(),
-            'maml_state_dict': maml.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'args': vars(args)
-        }, output_dir / 'last_model_state_before_test.pth')
-
-
-    test_results = {}
-    avg_test_acc_all_tasks = []
-    avg_test_loss_all_tasks = []
-
-    print("Starting testing on all individual PB tasks...")
-    for test_task_name in ALL_PB_TASKS:
-        print(f"--- Testing on task: {test_task_name} ---")
-        test_task_dataset = SameDifferentDataset(
-            data_dir=args.data_dir,
-            tasks=[test_task_name],
-            split='test',
-            support_sizes=[args.support_size_test], # Uses args.support_size_test
-            # query_size handled by HDF5 content based on args.query_size_test if files are named accordingly
-            # or if dataset internally uses a fixed Q or args.query_size_test to select episodes
-            # For now, assume test HDF5 files exist for the given S_test (Q_test implicit)
-        )
-        test_task_loader = DataLoader(
-            test_task_dataset,
-            batch_size=args.meta_batch_size, # For testing, can make this larger if desired for more test episodes
-            shuffle=False,
-            num_workers=args.num_workers,
-            pin_memory=True if use_cuda else False,
-            collate_fn=collate_episodes
-        )
-
-        test_loss, test_acc = validate_or_test(
-            maml, test_task_loader, device, args.adaptation_steps_test,
-            mode='Testing', test_task_name=test_task_name
-        )
-        
-        print(f"Task: {test_task_name} - Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
-        test_results[test_task_name] = {'loss': test_loss, 'accuracy': test_acc}
-        avg_test_acc_all_tasks.append(test_acc)
-        avg_test_loss_all_tasks.append(test_loss)
-
-    final_summary = {
-        'experiment_name': exp_name,
-        'args': vars(args),
-        'best_validation_accuracy': best_val_acc,
-        'best_validation_loss': best_val_loss,
-        'individual_task_test_results': test_results,
-        'average_test_accuracy_all_tasks': np.mean(avg_test_acc_all_tasks) if avg_test_acc_all_tasks else 0.0,
-        'std_test_accuracy_all_tasks': np.std(avg_test_acc_all_tasks) if avg_test_acc_all_tasks else 0.0,
-        'average_test_loss_all_tasks': np.mean(avg_test_loss_all_tasks) if avg_test_loss_all_tasks else 0.0,
-    }
-
-    with open(output_dir / 'final_summary_results.json', 'w') as f_summary:
-        json.dump(final_summary, f_summary, indent=4)
-
-    print("--- Final Summary ---")
-    print(f"Experiment: {exp_name}")
-    print(f"Best Validation Accuracy: {best_val_acc:.4f}")
-    if avg_test_acc_all_tasks:
-        print(f"Average Test Accuracy (all tasks): {np.mean(avg_test_acc_all_tasks):.4f} +/- {np.std(avg_test_acc_all_tasks):.4f}")
+    # --- Final Testing ---
+    print("\n--- Final Testing on All Tasks ---")
+    best_model_path = output_dir / 'best_model.pth'
+    if best_model_path.exists():
+        maml.load_state_dict(torch.load(best_model_path))
+        print("Loaded best model for final testing.")
     else:
-        print("Average Test Accuracy (all tasks): N/A (no tasks tested or all failed)")
-    print(f"Individual test results saved in: {output_dir / 'final_summary_results.json'}")
-    print(f"Full metrics history saved in: {output_dir / 'metrics_history.json'}")
+        print("Warning: No best model found. Testing with the final model state.")
+
+    test_dataset = SameDifferentDataset(args.data_dir, ALL_PB_TASKS, 'test', support_sizes=[args.support_size_test])
+    test_loader = DataLoader(test_dataset, batch_size=args.meta_batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True)
+    
+    test_loss, test_acc, individual_task_results = validate_or_test(maml, test_loader, device, args.adaptation_steps_test, mode='Testing')
+    
+    print("\n--- Overall Test Performance ---")
+    print(f"  Overall Test Loss: {test_loss:.4f}")
+    print(f"  Overall Test Acc: {test_acc:.4f}")
+    
+    print("\n--- Per-Task Test Performance ---")
+    for task, metrics in individual_task_results.items():
+        print(f"  Task: {task:<12} | Loss: {metrics['loss']:.4f} | Acc: {metrics['accuracy']:.4f}")
+
+    # --- Save Final Results ---
+    final_summary = {
+        'args': vars(args),
+        'best_val_acc': best_val_acc,
+        'overall_test_loss': test_loss,
+        'overall_test_acc': test_acc,
+        'individual_task_test_results': individual_task_results,
+        'full_metrics_history': metrics_history
+    }
+    with open(output_dir / 'final_summary_results.json', 'w') as f:
+        json.dump(final_summary, f, indent=4)
+        
+    print(f"\nResults and metrics saved to: {output_dir}")
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Run MAML training on all PB tasks with variable support sizes.')
+    parser = argparse.ArgumentParser(description='FOMAML training and testing on PB tasks.')
+    
+    # --- Path Arguments ---
+    parser.add_argument('--data_dir', type=str, default='/scratch/gpfs/mg7411/samedifferent/data/meta_h5/pb', help='Directory for the PB HDF5 files.')
+    parser.add_argument('--output_base_dir', type=str, default='./results/fomaml_experiments', help='Base directory to save experiment outputs.')
 
-    # --- Paths and Basic Setup ---
-    parser.add_argument('--data_dir', type=str, default='data/meta_h5/pb', help='Directory for PB HDF5 data files.')
-    parser.add_argument('--output_base_dir', type=str, default='./results/maml_all_tasks', help='Base directory to save experiment results.')
-    parser.add_argument('--architecture', type=str, required=True, choices=['conv2', 'conv4', 'conv6'], help='Model architecture.')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed.')
-    parser.add_argument('--force_cpu', action='store_true', help='Force CPU usage even if CUDA is available.')
-    parser.add_argument('--num_workers', type=int, default=0, help='Number of workers for DataLoader. 0 for main process.')
+    # --- Model and Run Arguments ---
+    parser.add_argument('--architecture', type=str, required=True, choices=['conv2', 'conv4', 'conv6'], help='CNN architecture to use.')
+    parser.add_argument('--seed', type=int, required=True, help='Random seed.')
+    parser.add_argument('--force_cpu', action='store_true', help='Force use of CPU even if CUDA is available.')
+    parser.add_argument('--num_workers', type=int, default=2, help='Number of workers for DataLoader.')
 
     # --- MAML specific ---
     parser.add_argument('--first_order', action='store_true', help='Use First-Order MAML (FOMAML). If not set, 2nd order MAML is used.')
@@ -595,45 +386,31 @@ if __name__ == '__main__':
     parser.add_argument('--meta_batch_size', type=int, default=8, help='Number of tasks per meta-batch.')
     parser.add_argument('--inner_lr', type=float, default=0.05, help='Learning rate for the inner loop adaptation.')
     parser.add_argument('--outer_lr', type=float, default=0.001, help='Learning rate for the outer loop.')
+    parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the outer loop optimizer.')
+    parser.add_argument('--support_size_test', type=int, default=10, help='Support size for the test set (if using a different one).')
+    # This argument is logged but does not affect data loading, which is determined by the HDF5 file structure.
+    parser.add_argument('--query_size_test', type=int, default=2, help='Query size for the test set. (LOGGING ONLY)')
+    parser.add_argument('--epochs', type=int, default=100, help='Number of meta-training epochs.')
     parser.add_argument('--adaptation_steps_train', type=int, default=5, help='Number of adaptation steps during the meta-training inner loop.')
     parser.add_argument('--adaptation_steps_val', type=int, default=10, help='Number of adaptation steps during validation.')
     parser.add_argument('--adaptation_steps_test', type=int, default=10, help='Number of adaptation steps during meta-testing.')
-    
-    # Note: VARIABLE_SUPPORT_SIZES and FIXED_QUERY_SIZE are hardcoded in the script for now.
-    # These could be made into args if more flexibility is needed for HDF5 structure.
-    # For testing phase:
-    parser.add_argument('--support_size_test', type=int, default=10, help='Support size for the test set (if using a different one).')
-    # This argument is logged but does not affect data loading, which is determined by the HDF5 file structure.
-    # It is kept for compatibility with previous logs but should not be the source of truth for query size.
-    parser.add_argument('--query_size_test', type=int, default=2, help='Query size for the test set. (LOGGING ONLY)')
-
-
-    # --- Training loop ---
-    parser.add_argument('--epochs', type=int, default=100, help='Number of meta-training epochs.')
     parser.add_argument('--num_val_meta_batches', type=int, default=25, help='Number of meta-batches for a full validation pass.')
     parser.add_argument('--val_freq', type=int, default=1, help='How many epochs to wait between validations.')
-    
-    # --- Early stopping & AMP & Other ---
     parser.add_argument('--patience', type=int, default=20, help='Patience for early stopping before validation acc improvement.')
     parser.add_argument('--improvement_threshold', type=float, default=0.001, help='Minimum improvement in val_acc to reset patience.')
     parser.add_argument('--use_amp', action='store_true', help='Use Automatic Mixed Precision (AMP) for training if CUDA is available.')
-    parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the outer loop optimizer.')
     parser.add_argument('--grad_clip_norm', type=float, default=None, help='Max norm for gradient clipping. Default is None (no clipping).')
 
-
-    # --- Debug related ---
-    parser.add_argument('--debug_bn_grads', action='store_true', help='Enable detailed BN grad logging (if model supports it).')
-    
     main_args = parser.parse_args()
     
-    exit_code = 0 # Default to success
+    exit_code = 0 
     try:
         main(main_args)
     except Exception as e:
-        print(f"Error during MAML script execution: {e}", file=sys.stderr)
+        print(f"Error during MAML script execution: {e}")
         import traceback
         traceback.print_exc()
         exit_code = 1
-    finally:
-        print(f"MAML script finished with exit code: {exit_code}")
-        sys.exit(exit_code) 
+    
+    print(f"MAML script finished with exit code: {exit_code}")
+    sys.exit(exit_code)
