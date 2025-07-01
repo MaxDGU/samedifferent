@@ -260,7 +260,7 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
                 # Ignoring it might be too lenient. Let's add a large loss and 0 acc to make it count.
                 print(f"Warning: Task {task_idx} adaptation failed. Assigning high loss and 0 acc.")
                 query_loss_for_task = torch.tensor(100.0, device=device) # Arbitrary large loss
-                acc = 0.0
+                query_acc_for_task = 0.0
             else: 
                 # Evaluation Phase (Query Set)
                 with torch.amp.autocast(device_type=device.type, enabled=scaler is not None):
@@ -273,13 +273,14 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
                 if torch.isnan(query_loss_for_task) or torch.isinf(query_loss_for_task):
                     print(f"CRITICAL: NaN/Inf query_loss_for_task. Arch: {current_arch}, E{epoch_num} B{meta_batch_idx} T{task_idx}. Loss: {query_loss_for_task.item()}. Assigning high loss and 0 acc.")
                     query_loss_for_task = torch.tensor(100.0, device=device) # Arbitrary large loss
-                    acc = 0.0
+                    query_acc_for_task = 0.0
                 else:
-                    acc = accuracy(query_preds, query_labels)
+                    query_acc_for_task = accuracy(query_preds, query_labels)
             
             if not torch.isnan(query_loss_for_task) and not torch.isinf(query_loss_for_task):
                 sum_query_losses_for_meta_batch += query_loss_for_task
-                sum_query_accs_for_meta_batch += acc.item()
+                sum_query_accs_for_meta_batch += query_acc_for_task.item()
+                num_successful_tasks += 1
             else:
                 print(f"Warning: NaN/Inf query_loss detected for task {task_idx} in meta-batch {meta_batch_idx}. Skipping its contribution.")
             # End of per-task processing in meta-batch
