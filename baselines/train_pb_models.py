@@ -108,21 +108,13 @@ def main():
             # Check if validation accuracy improved
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
-                torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'val_loss': val_loss,
-                    'val_acc': val_acc
-                }, os.path.join(model_dir, 'best_model.pt'))
                 print(f'New best validation accuracy: {val_acc:.2f}%')
             
             print(f'Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%')
             print(f'Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}%')
-            print(f'Best Val Acc: {best_val_acc:.2f}%')
             
             # Early stopping check
-            early_stopping(val_acc)
+            early_stopping(val_acc, model)
             if early_stopping.should_stop:
                 print(f'Early stopping triggered after epoch {epoch+1}')
                 print(f'No improvement of {args.improvement_threshold*100}% or more in validation accuracy for {args.patience} validations')
