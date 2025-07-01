@@ -10,10 +10,10 @@ from tqdm import tqdm
 import random
 import argparse
 from PIL import Image
-from baselines.models.conv2 import SameDifferentCNN as Conv2CNN
-from baselines.models.conv4 import SameDifferentCNN as Conv4CNN
-from baselines.models.conv6 import SameDifferentCNN as Conv6CNN
-from baselines.models.utils import SameDifferentDataset, train_epoch, validate_epoch, EarlyStopping
+from models.conv2 import SameDifferentCNN as Conv2CNN
+from models.conv4 import SameDifferentCNN as Conv4CNN
+from models.conv6 import SameDifferentCNN as Conv6CNN
+from models.utils import SameDifferentDataset, train_epoch, validate_epoch, EarlyStopping
 
 def set_seed(seed):
     """Set random seed for reproducibility."""
