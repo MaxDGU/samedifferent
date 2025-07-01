@@ -105,179 +105,88 @@ class SameDifferentDataset(Dataset):
         
         return {'image': image, 'label': label, 'task': task_name}
 
-def train_epoch(model, train_loader, criterion, optimizer, device):
-    """Train for one epoch."""
+def train_epoch(model, loader, criterion, optimizer, device):
     model.train()
     running_loss = 0.0
-    running_acc = 0.0
-    
-    pbar = tqdm(train_loader, desc='Training')
-    for batch in pbar:
-        images = batch['image'].to(device)
-        labels = batch['label'].to(device)
+    correct = 0
+    total = 0
+    for data, labels in tqdm(loader, desc="Training"):
+        data, labels = data.to(device), labels.to(device)
         
         optimizer.zero_grad()
-        outputs = model(images)
+        outputs = model(data)
+        if outputs.dim() > 1 and outputs.shape[1] > 1:
+            outputs = outputs[:, 1] - outputs[:, 0]
+        else:
+            outputs = outputs.squeeze()
         
-        loss = criterion(outputs, labels.long())
+        loss = criterion(outputs, labels.float())
         loss.backward()
-        
         optimizer.step()
-        preds = outputs.argmax(dim=1)
-        acc = (preds == labels).float().mean()
         
         running_loss += loss.item()
-        running_acc += acc.item()
         
-        pbar.set_postfix({
-            'loss': f'{running_loss/len(train_loader):.4f}',
-            'acc': f'{running_acc/len(train_loader):.4f}'
-        })
-    
-    return running_loss / len(train_loader), running_acc / len(train_loader)
+        predicted = (torch.sigmoid(outputs) > 0.5).long()
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+        
+    avg_loss = running_loss / len(loader)
+    accuracy = 100 * correct / total
+    return avg_loss, accuracy
 
-def validate(model, val_loader, criterion, device):
-    """Validate the model."""
+def validate_epoch(model, loader, criterion, device):
     model.eval()
-    val_loss = 0.0
-    val_acc = 0.0
-    
+    running_loss = 0.0
+    correct = 0
+    total = 0
     with torch.no_grad():
-        for batch in tqdm(val_loader, desc='Validating'):
-            images = batch['image'].to(device)
-            labels = batch['label'].to(device)
+        for data, labels in tqdm(loader, desc="Validation"):
+            data, labels = data.to(device), labels.to(device)
+            outputs = model(data)
+            if outputs.dim() > 1 and outputs.shape[1] > 1:
+                outputs = outputs[:, 1] - outputs[:, 0]
+            else:
+                outputs = outputs.squeeze()
+
+            loss = criterion(outputs, labels.float())
+            running_loss += loss.item()
+
+            predicted = (torch.sigmoid(outputs) > 0.5).long()
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
             
-            outputs = model(images)
-            loss = criterion(outputs, labels.long())
-            
-            preds = outputs.argmax(dim=1)
-            acc = (preds == labels).float().mean()
-            
-            val_loss += loss.item()
-            val_acc += acc.item()
-    
-    return val_loss / len(val_loader), val_acc / len(val_loader)
+    avg_loss = running_loss / len(loader)
+    accuracy = 100 * correct / total
+    return avg_loss, accuracy
 
 class EarlyStopping:
-    def __init__(self, patience=20, min_delta=0.001):
+    def __init__(self, patience=10, verbose=False, path='checkpoint.pt'):
         self.patience = patience
-        self.min_delta = min_delta
+        self.verbose = verbose
         self.counter = 0
-        self.best_val = None
-        self.should_stop = False
-    
-    def __call__(self, acc):
-        if self.best_val is None:
-            self.best_val = acc
-        elif acc < self.best_val + self.min_delta:
+        self.best_score = None
+        self.early_stop = False
+        self.val_loss_min = np.Inf
+        self.path = path
+
+    def __call__(self, val_loss, model):
+        score = -val_loss
+        if self.best_score is None:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+        elif score < self.best_score:
             self.counter += 1
+            if self.verbose:
+                print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
             if self.counter >= self.patience:
-                self.should_stop = True
+                self.early_stop = True
         else:
-            self.best_val = acc
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
             self.counter = 0
 
-def train_model(model_class, args):
-    """Generic training function for baseline models."""
-    #can specify seeds in advance for tracking
-    if args.seed is not None:
-        torch.manual_seed(args.seed)
-        np.random.seed(args.seed)
-        random.seed(args.seed)
-        torch.cuda.manual_seed(args.seed) if torch.cuda.is_available() else None
-    
-    #determine device type, if running on cluster this will be cuda, else cpu for testing 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    batch_size = 32
-    num_epochs = 100
-    
-    # Create output directory if it doesn't exist
-    os.makedirs(args.output_dir, exist_ok=True)
-    
-    # Create datasets and dataloaders
-    train_dataset = args.dataset_class(args.data_dir, args.task, 'train')
-    val_dataset = args.dataset_class(args.data_dir, args.task, 'test')  # Using test split as validation
-    
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True
-    )
-    
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True
-    )
-    
-    model = model_class().to(device)
-    print(f"Model created on {device}")
-    
-    #lr is outer loop learning rate here 
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=1e-4,
-        weight_decay=0.01
-    )
-    
-    # Initialize early stopping
-    early_stopping = EarlyStopping(patience=20)
-    best_val_acc = 0.0
-    train_accs = []
-    val_accs = []
-    
-    # Training loop
-    for epoch in range(num_epochs):
-        print(f"\nEpoch {epoch + 1}/{num_epochs}")
-        
-        #import train_epoch from utils and validate 
-        train_loss, train_acc = train_epoch(model, train_loader, F.cross_entropy, optimizer, device)
-        print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
-        train_accs.append(train_acc)
-        
-        val_loss, val_acc = validate(model, val_loader, F.cross_entropy, device)
-        print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
-        val_accs.append(val_acc)
-        
-        # Early stopping check on validation accuracy
-        early_stopping(val_acc)
-        if early_stopping.should_stop:
-            print("Early stopping triggered!")
-            break
-        
-        # Save best model based on validation accuracy
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'train_acc': train_acc,
-                'val_acc': val_acc,
-            }, os.path.join(args.output_dir, 'best_model.pt'))
-    
-    # Load best model for final evaluation
-    checkpoint = torch.load(os.path.join(args.output_dir, 'best_model.pt'))
-    model.load_state_dict(checkpoint['model_state_dict'])
-    
-    # Final validation pass (using this as test set)
-    final_val_loss, final_val_acc = validate(model, val_loader, F.cross_entropy, device)
-    print(f"\nFinal Results:")
-    print(f"Test Loss: {final_val_loss:.4f}")
-    print(f"Test Accuracy: {final_val_acc:.4f}")
-    
-    # Save results in the format expected by run_baselines.py
-    results = {
-        'train_acc': train_accs,
-        'val_acc': val_accs,
-        'test_acc': final_val_acc
-    }
-    
-    results_file = os.path.join(args.output_dir, 'results.json')
-    with open(results_file, 'w') as f:
-        json.dump(results, f, indent=4)
-    print(f"Results saved to {results_file}") 
+    def save_checkpoint(self, val_loss, model):
+        if self.verbose:
+            print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
+        torch.save(model.state_dict(), self.path)
+        self.val_loss_min = val_loss 
