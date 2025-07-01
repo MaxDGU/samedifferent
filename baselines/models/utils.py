@@ -160,7 +160,7 @@ def validate_epoch(model, loader, criterion, device):
     return avg_loss, accuracy
 
 class EarlyStopping:
-    def __init__(self, patience=10, verbose=False, path='checkpoint.pt'):
+    def __init__(self, patience=10, verbose=False, path='checkpoint.pt', delta=0):
         self.patience = patience
         self.verbose = verbose
         self.counter = 0
@@ -168,13 +168,14 @@ class EarlyStopping:
         self.early_stop = False
         self.val_loss_min = np.Inf
         self.path = path
+        self.delta = delta
 
     def __call__(self, val_loss, model):
         score = -val_loss
         if self.best_score is None:
             self.best_score = score
             self.save_checkpoint(val_loss, model)
-        elif score < self.best_score:
+        elif score < self.best_score + self.delta:
             self.counter += 1
             if self.verbose:
                 print(f'EarlyStopping counter: {self.counter} out of {self.patience}')

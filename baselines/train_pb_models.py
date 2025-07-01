@@ -83,7 +83,7 @@ def main():
     # Training loop
     best_val_acc = 0
     training_history = []
-    early_stopping = EarlyStopping(patience=args.patience, verbose=True, path=os.path.join(model_dir, 'best_model.pt'))
+    early_stopping = EarlyStopping(patience=10, verbose=True, path=os.path.join(model_dir, 'best_model.pt'), delta=-0.01)
     
     for epoch in range(args.epochs):
         print(f'\nEpoch {epoch+1}/{args.epochs}')
@@ -114,10 +114,9 @@ def main():
             print(f'Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}%')
             
             # Early stopping check
-            early_stopping(val_acc, model)
-            if early_stopping.should_stop:
+            early_stopping(val_loss, model)
+            if early_stopping.early_stop:
                 print(f'Early stopping triggered after epoch {epoch+1}')
-                print(f'No improvement of {args.improvement_threshold*100}% or more in validation accuracy for {args.patience} validations')
                 break
         else:
             # Just save training metrics

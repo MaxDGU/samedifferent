@@ -284,7 +284,6 @@ def accuracy(predictions, targets):
     with torch.no_grad():
         predictions = F.softmax(predictions, dim=1)
         predictions = (predictions[:, 1] > 0.5).float()
-        targets = targets.squeeze(1)
         return (predictions == targets).float().mean()
 
 def load_model(model_path, model, optimizer=None):
@@ -466,180 +465,119 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler)
     return total_loss / num_batches, total_acc / num_batches
 
 def main(seed=None, output_dir=None, pb_data_dir='data/pb/pb'):
-    """Main training function with support for resuming from checkpoint"""
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', type=str, default='data/pb/pb',
-                        help='Directory containing the PB dataset')
-    parser.add_argument('--output_dir', type=str, default='results/meta_baselines',
-                        help='Directory to save results')
-    parser.add_argument('--seed', type=int, required=True,
-                        help='Random seed for reproducibility')
-    parser.add_argument('--batch_size', type=int, default=32,
-                        help='Batch size for training and testing')
-    parser.add_argument('--epochs', type=int, default=100,
-                        help='Number of training epochs')
-    parser.add_argument('--support_size', type=int, default=10,
-                        help='Number of support examples per class')
-    parser.add_argument('--adaptation_steps', type=int, default=5,
-                        help='Number of adaptation steps during training')
-    parser.add_argument('--test_adaptation_steps', type=int, default=15,
-                        help='Number of adaptation steps during testing')
-    parser.add_argument('--inner_lr', type=float, default=0.05,
-                        help='Inner loop learning rate')
-    parser.add_argument('--outer_lr', type=float, default=0.001,
-                        help='Outer loop learning rate')
-    args = parser.parse_args()
     
-    try:
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA is not available. This script requires GPU access.")
-        device = torch.device('cuda')
-        print(f"Using device: {device}")
+    if seed is None:
+        seed = random.randint(1, 10000)
+    
+    output_dir = output_dir or f"holdout_experiment/results_seed_{seed}"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # --- 1. Configuration ---
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using seed: {seed}, device: {device}")
+    
+    # Training parameters
+    meta_lr = 0.001
+    fast_lr = 0.05
+    meta_batch_size = 16
+    adaptation_steps = 15
+    num_iterations = 2000
+    
+    # --- 2. Data Loading ---
+    # Define tasks: all PB tasks except for 'regular'
+    all_tasks = [os.path.basename(p).replace('_support10_train.h5', '') 
+                 for p in glob.glob(os.path.join(pb_data_dir, '*_train.h5'))]
+    
+    train_tasks = [t for t in all_tasks if t != 'regular']
+    val_task = ['regular']
+    
+    print(f"\nTraining on tasks: {train_tasks}")
+    print(f"Validating on holdout task: {val_task}\n")
+    
+    train_dataset = SameDifferentDataset(
+        data_dir=pb_data_dir,
+        tasks=train_tasks,
+        split='train',
+        support_sizes=[4, 6, 8, 10]
+    )
+    
+    val_dataset = SameDifferentDataset(
+        data_dir=pb_data_dir,
+        tasks=val_task,
+        split='val',
+        support_sizes=[10]
+    )
+    
+    # --- 3. Model & Optimizer ---
+    model = SameDifferentCNN().to(device)
+    maml = l2l.algorithms.MAML(model, lr=fast_lr, first_order=False, allow_unused=True)
+    
+    optimizer = torch.optim.Adam(maml.parameters(), lr=meta_lr)
+    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == 'cuda'))
+    
+    # --- 4. Training Loop ---
+    best_val_acc = 0.0
+    early_stopper = EarlyStopping(patience=10, min_delta=0.005)
+    
+    for epoch in range(3): # Train for 3 epochs
+        print(f"\n--- Epoch {epoch+1}/{num_iterations} ---")
         
-        if not os.path.exists(args.data_dir):
-            raise FileNotFoundError(f"Data directory not found: {args.data_dir}")
+        # Create a new loader for each epoch to ensure random sampling
+        train_loader = DataLoader(train_dataset, 
+                                  batch_size=meta_batch_size, 
+                                  shuffle=True, 
+                                  collate_fn=collate_episodes,
+                                  num_workers=4,
+                                  pin_memory=True)
         
-        if args.seed is not None:
-            torch.manual_seed(args.seed)
-            np.random.seed(args.seed)
-            random.seed(args.seed)
-            torch.cuda.manual_seed(args.seed)
-        
-        arch_dir = os.path.join(args.output_dir, 'conv6', f'seed_{args.seed}')
-        os.makedirs(arch_dir, exist_ok=True)
-        
-        print("\nCreating datasets...")
-        train_tasks = ['regular', 'lines', 'open', 'wider_line', 'scrambled',
-                       'random_color', 'arrows', 'irregular', 'filled', 'original']
-        train_dataset = SameDifferentDataset(args.data_dir, train_tasks, 'train', support_sizes=[args.support_size])
-        val_dataset = SameDifferentDataset(args.data_dir, train_tasks, 'val', support_sizes=[args.support_size])
-        
-        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, 
-                                num_workers=4, pin_memory=True, collate_fn=collate_episodes)
-        val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, 
-                              num_workers=4, pin_memory=True, collate_fn=collate_episodes)
-        
-        print("\nCreating conv6 model")
-        model = SameDifferentCNN().to(device)
-        
-        for m in model.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0.01)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0.01)
-        
-        print(f"Model created and initialized on {device}")
-        
-        maml = l2l.algorithms.MAML(
-            model,
-            lr=args.inner_lr,
-            first_order=False,
-            allow_unused=True,
-            allow_nograd=True
+        train_loss, train_acc = train_epoch(
+            maml,
+            train_loader,
+            optimizer,
+            device,
+            adaptation_steps,
+            scaler
         )
         
-        for param in maml.parameters():
-            param.requires_grad = True
+        val_acc, _ = validate(
+            maml,
+            val_dataset,
+            device,
+            meta_batch_size=meta_batch_size,
+            num_adaptation_steps=adaptation_steps
+        )
         
-        optimizer = torch.optim.Adam(maml.parameters(), lr=args.outer_lr)
-        scaler = torch.cuda.amp.GradScaler()
+        print(f"Epoch {epoch+1}: Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Acc: {val_acc:.4f}")
         
-        print("\nStarting training...")
-        best_val_acc = 0
-        patience = 10
-        patience_counter = 0
-        
-        for epoch in range(args.epochs):
-            print(f"\nEpoch {epoch+1}/{args.epochs}")
+        # Save model if validation accuracy improves
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            model_path = os.path.join(output_dir, 'best_model.pt')
+            torch.save({
+                'epoch': epoch + 1,
+                'model_state_dict': maml.module.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_acc': val_acc,
+            }, model_path)
+            print(f"Saved new best model to {model_path}")
             
-            try:
-                train_loss, train_acc = train_epoch(
-                    maml, train_loader, optimizer, device,
-                    args.adaptation_steps, scaler
-                )
-                
-                val_loss, val_acc = validate(
-                    maml, val_loader, device,
-                    args.adaptation_steps, args.inner_lr
-                )
-                
-                print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
-                print(f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
-                
-                if val_acc > best_val_acc:
-                    best_val_acc = val_acc
-                    torch.save({
-                        'epoch': epoch,
-                        'model_state_dict': model.state_dict(),
-                        'maml_state_dict': maml.state_dict(),
-                        'optimizer_state_dict': optimizer.state_dict(),
-                        'train_loss': train_loss,
-                        'train_acc': train_acc,
-                        'val_loss': val_loss,
-                        'val_acc': val_acc,
-                    }, os.path.join(arch_dir, 'best_model.pt'))
-                    patience_counter = 0
-                else:
-                    patience_counter += 1
-                    if patience_counter >= patience:
-                        print(f'Early stopping triggered after {epoch + 1} epochs')
-                        break
+        if early_stopper(val_acc):
+            print("Early stopping triggered.")
+            break
             
-            except RuntimeError as e:
-                if "out of memory" in str(e):
-                    print(f"WARNING: GPU OOM error in epoch {epoch+1}. Trying to recover...")
-                    torch.cuda.empty_cache()
-                    gc.collect()
-                    continue
-                else:
-                    raise e
-        
-        print("\nTesting on individual tasks...")
-        checkpoint = torch.load(os.path.join(arch_dir, 'best_model.pt'))
-        model.load_state_dict(checkpoint['model_state_dict'])
-        maml.load_state_dict(checkpoint['maml_state_dict'])
-        
-        test_results = {}
-        for task in train_tasks:
-            print(f"\nTesting on task: {task}")
-            test_dataset = SameDifferentDataset(args.data_dir, [task], 'test', support_sizes=[args.support_size])
-            test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, 
-                                   num_workers=4, pin_memory=True, collate_fn=collate_episodes)
-            
-            test_loss, test_acc = validate(
-                maml, test_loader, device,
-                args.test_adaptation_steps, args.inner_lr
-            )
-            
-            test_results[task] = {
-                'loss': test_loss,
-                'accuracy': test_acc
-            }
-            print(f"Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
-        
-        results = {
-            'test_results': test_results,
-            'best_val_metrics': {
-                'loss': checkpoint['val_loss'],
-                'accuracy': checkpoint['val_acc'],
-                'epoch': checkpoint['epoch']
-            },
-            'args': vars(args)
-        }
-        
-        with open(os.path.join(arch_dir, 'results.json'), 'w') as f:
-            json.dump(results, f, indent=4)
-        
-        print(f"\nResults saved to: {arch_dir}")
-    
-    except Exception as e:
-        print(f"\nERROR: Training failed with error: {str(e)}")
-        sys.exit(1)
+    print("\nTraining finished.")
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description="Train MAML on holdout PB tasks.")
+    parser.add_argument('--seed', type=int, default=None, help='Random seed for reproducibility.')
+    parser.add_argument('--output_dir', type=str, default=None, help='Directory to save results.')
+    parser.add_argument('--pb_data_dir', type=str, default='data/meta_h5/pb', help='Path to problem-book data.')
+    
+    args = parser.parse_args()
+    main(seed=args.seed, output_dir=args.output_dir, pb_data_dir=args.pb_data_dir)
 
 

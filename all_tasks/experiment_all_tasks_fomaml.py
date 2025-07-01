@@ -280,7 +280,6 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
             if not torch.isnan(query_loss_for_task) and not torch.isinf(query_loss_for_task):
                 sum_query_losses_for_meta_batch += query_loss_for_task
                 sum_query_accs_for_meta_batch += query_acc_for_task.item()
-                num_successful_tasks += 1
             else:
                 print(f"Warning: NaN/Inf query_loss detected for task {task_idx} in meta-batch {meta_batch_idx}. Skipping its contribution.")
             # End of per-task processing in meta-batch
