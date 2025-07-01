@@ -2,14 +2,12 @@
 #SBATCH --job-name=fomaml_array     # Job name
 #SBATCH --output=logs/fomaml_array_%A_%a.out  # Standard output and error log
 #SBATCH --error=logs/fomaml_array_%A_%a.err
-#SBATCH --mail-type=ALL             # Mail events (NONE, BEGIN, END, FAIL, ALL)
-#SBATCH --mail-user=your_email@princeton.edu  # Where to send mail
 #SBATCH --nodes=1                   # Run all processes on a single node
 #SBATCH --ntasks=1                  # Run a single task
 #SBATCH --cpus-per-task=4           # Number of CPU cores per task
-#SBATCH --mem=32GB                  # Job memory request
+#SBATCH --mem=16GB                  # Job memory request
 #SBATCH --gres=gpu:1                # Request 1 GPU
-#SBATCH --time=12:00:00             # Time limit hrs:min:sec
+#SBATCH --time=8:00:00             # Time limit hrs:min:sec
 #SBATCH --array=0-14                # Array range: 3 architectures * 5 seeds = 15 jobs
 
 # Define the arrays for architectures and seeds
