@@ -115,11 +115,11 @@ def main():
                     'val_loss': val_loss,
                     'val_acc': val_acc
                 }, os.path.join(model_dir, 'best_model.pt'))
-                print(f'New best validation accuracy: {val_acc*100:.2f}%')
+                print(f'New best validation accuracy: {val_acc:.2f}%')
             
-            print(f'Train Loss: {train_loss:.4f} | Train Acc: {train_acc*100:.2f}%')
-            print(f'Val Loss: {val_loss:.4f} | Val Acc: {val_acc*100:.2f}%')
-            print(f'Best Val Acc: {best_val_acc*100:.2f}%')
+            print(f'Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%')
+            print(f'Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}%')
+            print(f'Best Val Acc: {best_val_acc:.2f}%')
             
             # Early stopping check
             early_stopping(val_acc)
@@ -136,7 +136,7 @@ def main():
                 'val_loss': None,
                 'val_acc': None
             })
-            print(f'Train Loss: {train_loss:.4f} | Train Acc: {train_acc*100:.2f}%')
+            print(f'Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%')
     
     # Load best model and evaluate on test set
     if os.path.exists(os.path.join(model_dir, 'best_model.pt')):
@@ -147,7 +147,7 @@ def main():
         print("No best model found, using final model state")
     
     test_loss, test_acc = validate_epoch(model, test_loader, criterion, device)
-    print(f'\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc*100:.2f}%')
+    print(f'\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc:.2f}%')
     
     # Save metrics
     metrics = {
