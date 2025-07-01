@@ -20,57 +20,60 @@ from .utils_meta import (
 )
 
 class SameDifferentCNN(nn.Module):
-    def __init__(self):
+    """
+    A 6-layer CNN aligned with the paper's specification.
+    - First layer: 18 filters, 6x6 kernel.
+    - Subsequent layers: 2x2 kernels, doubling filters.
+    - Pooling after each conv layer.
+    - Three 1024-unit FC layers with LayerNorm and Dropout.
+    """
+    def __init__(self, dropout_rate_fc=0.5):
         super(SameDifferentCNN, self).__init__()
         
-        # 6-layer CNN from Kim et al.
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm2d(32)
+        # Convolutional layers based on the paper's description
+        self.conv1 = nn.Conv2d(3, 18, kernel_size=6, stride=1, padding=2)
+        self.bn1 = nn.BatchNorm2d(18)
+        self.conv2 = nn.Conv2d(18, 36, kernel_size=2, stride=1, padding=1)
+        self.bn2 = nn.BatchNorm2d(36)
+        self.conv3 = nn.Conv2d(36, 72, kernel_size=2, stride=1, padding=1)
+        self.bn3 = nn.BatchNorm2d(72)
+        self.conv4 = nn.Conv2d(72, 144, kernel_size=2, stride=1, padding=1)
+        self.bn4 = nn.BatchNorm2d(144)
+        self.conv5 = nn.Conv2d(144, 288, kernel_size=2, stride=1, padding=1)
+        self.bn5 = nn.BatchNorm2d(288)
+        self.conv6 = nn.Conv2d(288, 576, kernel_size=2, stride=1, padding=1)
+        self.bn6 = nn.BatchNorm2d(576)
         
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm2d(64)
+        self.pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        self.bn3 = nn.BatchNorm2d(128)
-        
-        self.conv4 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
-        self.bn4 = nn.BatchNorm2d(256)
-        
-        self.conv5 = nn.Conv2d(256, 512, kernel_size=3, padding=1)
-        self.bn5 = nn.BatchNorm2d(512)
-        
-        self.conv6 = nn.Conv2d(512, 1024, kernel_size=3, padding=1)
-        self.bn6 = nn.BatchNorm2d(1024)
-        
-        self.pool = nn.MaxPool2d(2)
-        self.dropout2d = nn.Dropout2d(0.3)
-        
+        # Calculate the size of flattened features dynamically
         self._to_linear = None
         self._initialize_size()
         
-        # FC layers with decreasing sizes
+        # Three fully connected layers with 1024 units, with LayerNorm and Dropout
         self.fc_layers = nn.ModuleList([
             nn.Linear(self._to_linear, 1024),
-            nn.Linear(1024, 512),
-            nn.Linear(512, 256)
+            nn.Linear(1024, 1024),
+            nn.Linear(1024, 1024)
         ])
         
         self.layer_norms = nn.ModuleList([
             nn.LayerNorm(1024),
-            nn.LayerNorm(512),
-            nn.LayerNorm(256)
+            nn.LayerNorm(1024),
+            nn.LayerNorm(1024)
         ])
         
         self.dropouts = nn.ModuleList([
-            nn.Dropout(0.5) for _ in range(3)
+            nn.Dropout(dropout_rate_fc) for _ in range(3)
         ])
         
-        self.classifier = nn.Linear(256, 2)
-        self.temperature = nn.Parameter(torch.ones(1))
+        # Final classification layer
+        self.classifier = nn.Linear(1024, 2)
         
         self._initialize_weights()
-    
+
     def _initialize_size(self):
+        # Dummy forward pass to calculate the flattened size after conv layers
         x = torch.randn(1, 3, 128, 128)
         x = self.pool(F.relu(self.bn1(self.conv1(x))))
         x = self.pool(F.relu(self.bn2(self.conv2(x))))
@@ -80,41 +83,33 @@ class SameDifferentCNN(nn.Module):
         x = self.pool(F.relu(self.bn6(self.conv6(x))))
         x = x.reshape(x.size(0), -1)
         self._to_linear = x.size(1)
-    
+
     def _initialize_weights(self):
+        # Using Xavier initialization as specified in the paper
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                nn.init.constant_(m.bias, 0.01)
-            elif isinstance(m, nn.Linear) and m != self.classifier:
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                nn.init.constant_(m.bias, 0.01)
-        
-        # Initialize classifier with smaller weights for less confident predictions
-        nn.init.normal_(self.classifier.weight, mean=0.0, std=0.01)
-        nn.init.constant_(self.classifier.bias, 0)
-    
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
     def forward(self, x):
+        # Convolutional pathway
         x = self.pool(F.relu(self.bn1(self.conv1(x))))
-        x = self.dropout2d(x)
-        
         x = self.pool(F.relu(self.bn2(self.conv2(x))))
-        x = self.dropout2d(x)
-        
         x = self.pool(F.relu(self.bn3(self.conv3(x))))
-        x = self.dropout2d(x)
-        
         x = self.pool(F.relu(self.bn4(self.conv4(x))))
-        x = self.dropout2d(x)
-        
         x = self.pool(F.relu(self.bn5(self.conv5(x))))
-        x = self.dropout2d(x)
-        
         x = self.pool(F.relu(self.bn6(self.conv6(x))))
-        x = self.dropout2d(x)
         
         x = x.reshape(x.size(0), -1)
         
+        # Fully connected pathway with LayerNorm and Dropout
         for fc, ln, dropout in zip(self.fc_layers, self.layer_norms, self.dropouts):
             x = dropout(F.relu(ln(fc(x))))
         

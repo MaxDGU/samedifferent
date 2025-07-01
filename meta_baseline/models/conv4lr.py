@@ -20,7 +20,94 @@ from torchvision import transforms
 from .utils_meta import train_epoch, validate, EarlyStopping, SameDifferentDataset, collate_episodes
 
 # Import vanilla model architecture
-from baselines.models.conv4 import SameDifferentCNN
+class SameDifferentCNN(nn.Module):
+    """
+    A 4-layer CNN aligned with the paper's specification.
+    - First layer: 12 filters, 4x4 kernel.
+    - Subsequent layers: 2x2 kernels, doubling filters.
+    - Pooling after each conv layer.
+    - Three 1024-unit FC layers with LayerNorm and Dropout.
+    """
+    def __init__(self, dropout_rate_fc=0.5):
+        super(SameDifferentCNN, self).__init__()
+        
+        # Convolutional layers based on the paper's description
+        self.conv1 = nn.Conv2d(3, 12, kernel_size=4, stride=1, padding=2)
+        self.bn1 = nn.BatchNorm2d(12)
+        self.conv2 = nn.Conv2d(12, 24, kernel_size=2, stride=1, padding=1)
+        self.bn2 = nn.BatchNorm2d(24)
+        self.conv3 = nn.Conv2d(24, 48, kernel_size=2, stride=1, padding=1)
+        self.bn3 = nn.BatchNorm2d(48)
+        self.conv4 = nn.Conv2d(48, 96, kernel_size=2, stride=1, padding=1)
+        self.bn4 = nn.BatchNorm2d(96)
+        
+        self.pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        
+        # Calculate the size of flattened features dynamically
+        self._to_linear = None
+        self._initialize_size()
+        
+        # Three fully connected layers with 1024 units, with LayerNorm and Dropout
+        self.fc_layers = nn.ModuleList([
+            nn.Linear(self._to_linear, 1024),
+            nn.Linear(1024, 1024),
+            nn.Linear(1024, 1024)
+        ])
+        
+        self.layer_norms = nn.ModuleList([
+            nn.LayerNorm(1024),
+            nn.LayerNorm(1024),
+            nn.LayerNorm(1024)
+        ])
+        
+        self.dropouts = nn.ModuleList([
+            nn.Dropout(dropout_rate_fc) for _ in range(3)
+        ])
+        
+        # Final classification layer
+        self.classifier = nn.Linear(1024, 2)
+        
+        self._initialize_weights()
+
+    def _initialize_size(self):
+        # Dummy forward pass to calculate the flattened size after conv layers
+        x = torch.randn(1, 3, 128, 128)
+        x = self.pool(F.relu(self.bn1(self.conv1(x))))
+        x = self.pool(F.relu(self.bn2(self.conv2(x))))
+        x = self.pool(F.relu(self.bn3(self.conv3(x))))
+        x = self.pool(F.relu(self.bn4(self.conv4(x))))
+        x = x.reshape(x.size(0), -1)
+        self._to_linear = x.size(1)
+
+    def _initialize_weights(self):
+        # Using Xavier initialization as specified in the paper
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, x):
+        # Convolutional pathway
+        x = self.pool(F.relu(self.bn1(self.conv1(x))))
+        x = self.pool(F.relu(self.bn2(self.conv2(x))))
+        x = self.pool(F.relu(self.bn3(self.conv3(x))))
+        x = self.pool(F.relu(self.bn4(self.conv4(x))))
+        
+        x = x.reshape(x.size(0), -1)
+        
+        # Fully connected pathway with LayerNorm and Dropout
+        for fc, ln, dropout in zip(self.fc_layers, self.layer_norms, self.dropouts):
+            x = dropout(F.relu(ln(fc(x))))
+        
+        x = self.classifier(x)
+        return x # Output raw logits
 
 def main(seed=None, output_dir=None, pb_data_dir='data/pb/pb'):
     parser = argparse.ArgumentParser()
