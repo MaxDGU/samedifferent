@@ -14,11 +14,13 @@
 mkdir -p slurm_logs
 
 # Load required modules
-module load anaconda3
-module load cuda/11.7.0
+module load anaconda3/2022.5
+module load cudatoolkit/12.6
 
 # Activate conda environment
-source activate torch_env
+# Sourcing the conda.sh script is a more robust way to initialize conda
+source /usr/licensed/anaconda3/2022.5/etc/profile.d/conda.sh
+conda activate tensorflow # Using the environment name from your error log
 
 # Define architectures and seeds
 declare -a ARCHS=("conv2" "conv4" "conv6")
@@ -33,9 +35,9 @@ SEED=${SEEDS[$seed_idx]}
 
 echo "Running architecture: $ARCH with seed: $SEED"
 
-# Run the training and testing script
-python -m train_and_test_meta_baselines \
-    --data_dir data/pb/pb \
+# Run the training and testing script as a module from the project root
+python -m meta_baseline.train_and_test_meta_baselines \
+    --data_dir data/meta_h5/pb \
     --output_dir results/meta_baselines \
     --architecture $ARCH \
     --seed $SEED \
