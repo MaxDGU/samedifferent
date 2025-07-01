@@ -102,105 +102,6 @@ def print_debug_stats(tag, arch, epoch, meta_batch_idx, task_idx=None, adapt_ste
         print(f"  Total G Abs Sum (MAML model): {total_grad_sum_main:.3e}")
 
 
-# --- Custom Sampler for Variable Support Sizes ---
-class VariableSupportSampler(Sampler):
-    def __init__(self, dataset, num_batches, meta_batch_size, available_support_sizes):
-        self.dataset = dataset # SameDifferentDataset instance
-        self.num_batches = num_batches # e.g., args.num_meta_batches_per_epoch
-        self.meta_batch_size = meta_batch_size
-        self.available_support_sizes = available_support_sizes
-
-        # Pre-calculate indices for each support size for efficiency
-        self.indices_by_support_size = {s: [] for s in self.available_support_sizes}
-        global_idx_offset = 0
-        if hasattr(self.dataset, 'episode_files') and hasattr(self.dataset, 'file_episode_counts'):
-            for i, file_info in enumerate(self.dataset.episode_files):
-                s_size = file_info['support_size']
-                num_episodes_in_file = self.dataset.file_episode_counts[i]
-                if s_size in self.indices_by_support_size:
-                    self.indices_by_support_size[s_size].extend(
-                        range(global_idx_offset, global_idx_offset + num_episodes_in_file)
-                    )
-                global_idx_offset += num_episodes_in_file
-        else:
-            # Fallback or error if dataset structure is not as expected
-            # This might happen if SameDifferentDataset changes its internal structure
-            print("Warning: VariableSupportSampler could not pre-cache indices due to unexpected dataset structure.")
-            # The __iter__ method will then have to compute them on the fly (as it did before)
-
-        # Check if any indices were loaded, otherwise, __iter__ will have issues
-        if not any(self.indices_by_support_size.values()):
-            # This check is important if the pre-caching above failed or found nothing.
-            # If the dataset is genuinely empty for these support sizes, this will be caught here.
-            # However, SameDifferentDataset itself raises an error if no HDF5 files are found at all.
-            # This secondary check ensures the sampler is aware if its specific support_sizes have no episodes.
-            found_any_episodes = False
-            if hasattr(self.dataset, 'episode_files'): # Check again if iteration is needed
-                for s_size_check in self.available_support_sizes:
-                    if any(f_info['support_size'] == s_size_check for f_info in self.dataset.episode_files):
-                        found_any_episodes = True
-                        break
-            if not found_any_episodes:
-                 raise ValueError("VariableSupportSampler: No episodes found for ANY of the specified available_support_sizes. Check HDF5 files and dataset initialization.")
-
-
-    def __iter__(self):
-        for _ in range(self.num_batches):
-            current_support_size = random.choice(self.available_support_sizes)
-            
-            candidate_indices = self.indices_by_support_size.get(current_support_size)
-
-            # If pre-caching failed or that specific support size has no episodes from pre-caching
-            if candidate_indices is None or not candidate_indices:
-                # Fallback to on-the-fly computation if pre-caching didn't populate this key
-                # or if it was empty. This makes it robust if __init__ pre-caching had issues.
-                # print(f"Debug: Sampler falling back to on-the-fly index generation for S={current_support_size}")
-                candidate_indices_fallback = []
-                global_idx_offset = 0
-                if hasattr(self.dataset, 'episode_files') and hasattr(self.dataset, 'file_episode_counts'):
-                    for i, file_info in enumerate(self.dataset.episode_files):
-                        num_episodes_in_file = self.dataset.file_episode_counts[i]
-                        if file_info['support_size'] == current_support_size:
-                            candidate_indices_fallback.extend(range(global_idx_offset, global_idx_offset + num_episodes_in_file))
-                        global_idx_offset += num_episodes_in_file
-                    candidate_indices = candidate_indices_fallback # Use the new list
-                else:
-                    # Should not happen if dataset is standard SameDifferentDataset
-                    raise RuntimeError("VariableSupportSampler: Dataset does not have expected attributes for on-the-fly index generation.")
-            
-            if not candidate_indices:
-                # This means even the fallback failed to find episodes for the chosen support_size.
-                # Try to find a support size that *does* have episodes.
-                # print(f"Warning: No episodes found for support size {current_support_size}. Resampling S.")
-                attempts = 0
-                original_choice = current_support_size
-                while not candidate_indices and attempts < len(self.available_support_sizes) * 2:
-                    current_support_size = random.choice(self.available_support_sizes)
-                    candidate_indices = self.indices_by_support_size.get(current_support_size)
-                    if candidate_indices is None or not candidate_indices: # Also check on-the-fly for the new choice
-                        candidate_indices_fallback_retry = []
-                        global_idx_offset_retry = 0
-                        if hasattr(self.dataset, 'episode_files') and hasattr(self.dataset, 'file_episode_counts'):
-                            for i_retry, file_info_retry in enumerate(self.dataset.episode_files):
-                                num_episodes_in_file_retry = self.dataset.file_episode_counts[i_retry]
-                                if file_info_retry['support_size'] == current_support_size:
-                                    candidate_indices_fallback_retry.extend(range(global_idx_offset_retry, global_idx_offset_retry + num_episodes_in_file_retry))
-                                global_idx_offset_retry += num_episodes_in_file_retry
-                            candidate_indices = candidate_indices_fallback_retry
-                    attempts += 1
-                
-                if not candidate_indices:
-                    raise ValueError(f"VariableSupportSampler: Could not find episodes for any available support size after multiple attempts. Original S={original_choice}. Check HDF5 files.")
-
-            batch_indices = random.sample(candidate_indices, self.meta_batch_size)
-            yield batch_indices
-
-    def __len__(self):
-        # This is the number of meta-batches the DataLoader will produce per epoch
-        # When using batch_sampler, __len__ should return the number of batches.
-        return self.num_batches # <--- Correct: Number of meta-batches
-
-
 def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler, epoch_num, args):
     maml.train()
     total_meta_loss = 0
@@ -516,35 +417,28 @@ def main(args):
         support_sizes=VARIABLE_SUPPORT_SIZES, # Pass the list of S sizes
     )
 
-    # Create custom samplers
-    train_sampler = VariableSupportSampler(
-        dataset=train_dataset,
-        num_batches=args.num_meta_batches_per_epoch, # This is number of meta-batches
-        meta_batch_size=args.meta_batch_size,
-        available_support_sizes=VARIABLE_SUPPORT_SIZES
-    )
-    val_sampler = VariableSupportSampler(
-        dataset=val_dataset,
-        num_batches=args.num_val_meta_batches, # This is number of meta-batches
-        meta_batch_size=args.meta_batch_size,
-        available_support_sizes=VARIABLE_SUPPORT_SIZES
-    )
-
+    # --- Dataloaders ---
+    # Note: The 'collate_episodes' function from utils_meta is not used here,
+    # as the default collate function is sufficient for this dataset structure.
     train_loader = DataLoader(
         train_dataset,
-        batch_sampler=train_sampler, # Use batch_sampler instead of batch_size and shuffle
+        batch_size=args.meta_batch_size,
+        shuffle=True,
         num_workers=args.num_workers,
-        pin_memory=True if use_cuda else False,
-        collate_fn=collate_episodes
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_sampler=val_sampler, # Use batch_sampler
-        num_workers=args.num_workers,
-        pin_memory=True if use_cuda else False,
-        collate_fn=collate_episodes
+        pin_memory=True
     )
 
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=args.meta_batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=True
+    )
+
+    print(f"Train loader size: {len(train_loader)} batches")
+    print(f"Validation loader size: {len(val_loader)} batches")
+    
     # --- Training Loop ---
     best_val_acc = -1.0
     best_val_loss = float('inf')
@@ -716,12 +610,11 @@ if __name__ == '__main__':
 
     # --- Training loop ---
     parser.add_argument('--epochs', type=int, default=100, help='Number of meta-training epochs.')
-    parser.add_argument('--num_meta_batches_per_epoch', type=int, default=32, help='Number of meta-batches per training epoch.') # Matches MAML_NUM_ADAPTATION_SAMPLES in della_datapar
     parser.add_argument('--num_val_meta_batches', type=int, default=25, help='Number of meta-batches for a full validation pass.')
-    parser.add_argument('--val_freq', type=int, default=1, help='Frequency (in epochs) to perform validation.')
+    parser.add_argument('--val_freq', type=int, default=1, help='How many epochs to wait between validations.')
     
     # --- Early stopping & AMP & Other ---
-    parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping.')
+    parser.add_argument('--patience', type=int, default=20, help='Patience for early stopping before validation acc improvement.')
     parser.add_argument('--improvement_threshold', type=float, default=0.001, help='Minimum improvement in val_acc to reset patience.')
     parser.add_argument('--use_amp', action='store_true', help='Use Automatic Mixed Precision (AMP) for training if CUDA is available.')
     parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay for the outer loop optimizer.')
