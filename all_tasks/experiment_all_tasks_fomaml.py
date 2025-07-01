@@ -313,10 +313,10 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler,
             # print_debug_stats("PostOptimizerStep", current_arch, epoch_num, meta_batch_idx, maml_model=maml)
 
             total_meta_loss += meta_loss_for_batch.item()
-            total_meta_acc += meta_acc_for_batch.item()
+            total_meta_acc += meta_acc_for_batch
             num_meta_batches_processed += 1
         
-        pbar.set_postfix(meta_loss=meta_loss_for_batch.item() if meta_loss_for_batch is not None else 'N/A', meta_acc=meta_acc_for_batch.item() if meta_acc_for_batch is not None else 'N/A')
+        pbar.set_postfix(meta_loss=meta_loss_for_batch.item() if meta_loss_for_batch is not None else 'N/A', meta_acc=meta_acc_for_batch if meta_acc_for_batch is not None else 'N/A')
 
     if num_meta_batches_processed == 0: # Handle case where all batches were skipped
         print("Warning: No meta-batches processed in this epoch.")
