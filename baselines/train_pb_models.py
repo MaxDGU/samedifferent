@@ -10,10 +10,10 @@ from tqdm import tqdm
 import random
 import argparse
 from PIL import Image
-from .models.conv2 import SameDifferentCNN as Conv2CNN
-from .models.conv4 import SameDifferentCNN as Conv4CNN
-from .models.conv6 import SameDifferentCNN as Conv6CNN
-from .models.utils import SameDifferentDataset, train_epoch, validate, EarlyStopping
+from baselines.models.conv2 import SameDifferentCNN as Conv2CNN
+from baselines.models.conv4 import SameDifferentCNN as Conv4CNN
+from baselines.models.conv6 import SameDifferentCNN as Conv6CNN
+from baselines.models.utils import SameDifferentDataset, train_epoch, validate_epoch, EarlyStopping
 
 def set_seed(seed):
     """Set random seed for reproducibility."""
@@ -94,7 +94,7 @@ def main():
         # Only validate every val_freq epochs
         if (epoch + 1) % args.val_freq == 0:
             # Validate
-            val_loss, val_acc = validate(model, val_loader, criterion, device)
+            val_loss, val_acc = validate_epoch(model, val_loader, criterion, device)
             
             # Save history
             training_history.append({
@@ -146,7 +146,7 @@ def main():
     else:
         print("No best model found, using final model state")
     
-    test_loss, test_acc = validate(model, test_loader, criterion, device)
+    test_loss, test_acc = validate_epoch(model, test_loader, criterion, device)
     print(f'\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc*100:.2f}%')
     
     # Save metrics
