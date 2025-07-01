@@ -110,8 +110,8 @@ def train_epoch(model, loader, criterion, optimizer, device):
     running_loss = 0.0
     correct = 0
     total = 0
-    for data, labels in tqdm(loader, desc="Training"):
-        data, labels = data.to(device), labels.to(device)
+    for batch in tqdm(loader, desc="Training"):
+        data, labels = batch['image'].to(device), batch['label'].to(device)
         
         optimizer.zero_grad()
         outputs = model(data)
@@ -140,8 +140,8 @@ def validate_epoch(model, loader, criterion, device):
     correct = 0
     total = 0
     with torch.no_grad():
-        for data, labels in tqdm(loader, desc="Validation"):
-            data, labels = data.to(device), labels.to(device)
+        for batch in tqdm(loader, desc="Validation"):
+            data, labels = batch['image'].to(device), batch['label'].to(device)
             outputs = model(data)
             if outputs.dim() > 1 and outputs.shape[1] > 1:
                 outputs = outputs[:, 1] - outputs[:, 0]
