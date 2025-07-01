@@ -10,7 +10,11 @@ from PIL import Image
 from torchvision import transforms
 import json
 import argparse
-from .utils import train_epoch, validate, EarlyStopping, train_model, SameDifferentDataset
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from baselines.models.utils import train_epoch, validate_epoch, EarlyStopping, SameDifferentDataset
 
 
 class SameDifferentCNN(nn.Module):
