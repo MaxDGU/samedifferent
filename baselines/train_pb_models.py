@@ -37,7 +37,7 @@ def main():
     parser.add_argument('--patience', type=int, default=3)
     parser.add_argument('--val_freq', type=int, default=10)
     parser.add_argument('--improvement_threshold', type=float, default=0.02)
-    parser.add_argument('--data_dir', type=str, default='data/vanilla_h5')
+    parser.add_argument('--data_dir', type=str, default='data/meta_h5/pb')
     parser.add_argument('--output_dir', type=str, default='results/pb_baselines')
     args = parser.parse_args()
     
