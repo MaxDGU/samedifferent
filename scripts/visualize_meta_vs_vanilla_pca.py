@@ -58,7 +58,7 @@ def main():
     vanilla_base_path = '/scratch/gpfs/mg7411/samedifferent/results/pb_baselines_vanilla_final/all_tasks/conv6/test_regular/seed_{seed}/best_model.pt'
     
     # Paths for the meta-trained (FOMAML) models - THIS IS AN EDUCATED GUESS
-    meta_base_path = '/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6/model_{seed}_pretesting.pt'
+    meta_base_path = '/scratch/gpfs/mg7411/samedifferent/maml_pbweights_conv6/model_seed_{seed}_pretesting.pt'
 
     vanilla_paths = [vanilla_base_path.format(seed=s) for s in seeds]
     meta_paths = [meta_base_path.format(seed=s) for s in seeds_meta]

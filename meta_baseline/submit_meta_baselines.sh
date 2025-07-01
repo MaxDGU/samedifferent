@@ -41,7 +41,7 @@ python -m train_and_test_meta_baselines \
     --seed $SEED \
     --batch_size 32 \
     --epochs 100 \
-    --support_size 10 \
+    --support_size 4 6 8 10 \
     --adaptation_steps 5 \
     --test_adaptation_steps 15 \
     --outer_lr 0.001 

@@ -325,45 +325,21 @@ def validate(maml, val_loader, device, adaptation_steps=5, inner_lr=None, is_tes
             
         except RuntimeError as e:
             if "out of memory" in str(e):
-                print(f"\nWarning: GPU OOM error in validation batch {batch_idx}. Task: {task}")
+                print(f"OOM in validation. Skipping batch. Details: {e}")
+                processed_batches += 1
                 skipped_batches += 1
-                task_metrics[task]['skipped'] += 1
-                torch.cuda.empty_cache()
-                
-                # If we're skipping too many batches, raise an error
-                skip_ratio = skipped_batches / (processed_batches + skipped_batches)
-                if skip_ratio > 0.25:  # If we're skipping more than 25% of batches
-                    raise RuntimeError(
-                        f"Skipping too many batches ({skipped_batches}/{processed_batches + skipped_batches}). "
-                        "Try reducing batch size or model complexity."
-                    )
+                pbar.set_postfix({"skipped": f"{skipped_batches}/{total_batches}"})
                 continue
             else:
                 raise e
     
-    # Only calculate averages if we processed any batches
-    if processed_batches == 0:
-        raise RuntimeError("No batches were processed during validation!")
+    avg_loss = batch_loss / processed_batches if processed_batches > 0 else 0
+    avg_acc = batch_acc / processed_batches if processed_batches > 0 else 0
     
-    avg_loss = batch_loss / processed_batches
-    avg_acc = batch_acc / processed_batches
+    if is_test:
+        return avg_loss, avg_acc
     
-    # Print detailed metrics
-    print("\nValidation Summary:")
-    print(f"Processed batches: {processed_batches}/{total_batches}")
-    print(f"Skipped batches: {skipped_batches} ({skipped_batches/total_batches*100:.1f}%)")
-    print(f"Average loss: {avg_loss:.4f}")
-    print(f"Average accuracy: {avg_acc:.4f}")
-    
-    print("\nPer-task validation metrics:")
-    for task, metrics in task_metrics.items():
-        if metrics['processed'] > 0:
-            task_acc = np.mean(metrics['acc'])
-            task_loss = np.mean(metrics['loss'])
-            print(f"{task}: Acc = {task_acc:.4f}, Loss = {task_loss:.4f}")
-            print(f"  Processed: {metrics['processed']}, Skipped: {metrics['skipped']}")
-    
-    return avg_loss, avg_acc
+    return avg_loss, avg_acc, task_metrics
 
 def collate_episodes(batch):
     """Collate function that combines episodes into a batch dictionary with padding."""
@@ -530,3 +506,45 @@ def train_epoch(maml, train_loader, optimizer, device, adaptation_steps, scaler)
                 raise e
     
     return batch_loss / total_batches, batch_acc / total_batches 
+
+# --- Custom Sampler for Variable Support Sizes ---
+class VariableSupportSampler(torch.utils.data.Sampler):
+    def __init__(self, dataset, num_batches, meta_batch_size, available_support_sizes):
+        self.dataset = dataset
+        self.num_batches = num_batches
+        self.meta_batch_size = meta_batch_size
+        self.available_support_sizes = available_support_sizes
+
+        # Pre-calculate indices for each support size for efficiency
+        self.indices_by_support_size = {s: [] for s in self.available_support_sizes}
+        global_idx_offset = 0
+        if hasattr(self.dataset, 'episode_files') and hasattr(self.dataset, 'file_episode_counts'):
+            for i, file_info in enumerate(self.dataset.episode_files):
+                s_size = file_info['support_size']
+                num_episodes_in_file = self.dataset.file_episode_counts[i]
+                if s_size in self.indices_by_support_size:
+                    self.indices_by_support_size[s_size].extend(
+                        range(global_idx_offset, global_idx_offset + num_episodes_in_file)
+                    )
+                global_idx_offset += num_episodes_in_file
+        
+        if not any(self.indices_by_support_size.values()):
+            raise ValueError("VariableSupportSampler: No episodes found for ANY of the specified support sizes.")
+
+    def __iter__(self):
+        for _ in range(self.num_batches):
+            current_support_size = random.choice(self.available_support_sizes)
+            candidate_indices = self.indices_by_support_size.get(current_support_size, [])
+            
+            if not candidate_indices:
+                # This can happen if a support size was requested but no files were found for it.
+                # We'll just pick another one.
+                continue
+
+            # Ensure we don't sample more than available for small datasets
+            num_to_sample = min(self.meta_batch_size, len(candidate_indices))
+            batch_indices = random.sample(candidate_indices, num_to_sample)
+            yield batch_indices
+
+    def __len__(self):
+        return self.num_batches 

@@ -16,7 +16,7 @@ import torch.nn as nn
 from .models.conv2lr import SameDifferentCNN as Conv2CNN
 from .models.conv4lr import SameDifferentCNN as Conv4CNN
 from .models.conv6lr import SameDifferentCNN as Conv6CNN
-from .models.utils_meta import SameDifferentDataset, collate_episodes, train_epoch, validate
+from .models.utils_meta import SameDifferentDataset, collate_episodes, train_epoch, validate, VariableSupportSampler
 
 PB_TASKS = [
     'regular', 'lines', 'open', 'wider_line', 'scrambled',
@@ -100,9 +100,20 @@ def main():
         train_dataset = SameDifferentDataset(args.data_dir, PB_TASKS, 'train', support_sizes=args.support_size)
         val_dataset = SameDifferentDataset(args.data_dir, PB_TASKS, 'val', support_sizes=args.support_size)
         
-        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, 
-                                num_workers=1, pin_memory=True,
+        # Create the custom sampler for the training set
+        train_sampler = VariableSupportSampler(
+            train_dataset,
+            num_batches=len(train_dataset) // args.batch_size,
+            meta_batch_size=args.batch_size,
+            available_support_sizes=args.support_size
+        )
+        
+        train_loader = DataLoader(train_dataset,
+                                batch_sampler=train_sampler,
+                                num_workers=1,
+                                pin_memory=True,
                                 collate_fn=collate_episodes)
+
         val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, 
                               num_workers=1, pin_memory=True,
                               collate_fn=collate_episodes)
