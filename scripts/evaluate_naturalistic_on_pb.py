@@ -161,7 +161,7 @@ def main(args):
                     test_dataset, 
                     batch_size=args.batch_size, 
                     shuffle=False,
-                    collate_fn=l2l.data.MetaCollate(lambda x: x)
+                    collate_fn=lambda x: x
                 )
 
                 print(f"    Dataset loaded: {len(test_dataset)} episodes, {len(test_loader)} batches")
