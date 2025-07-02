@@ -14,7 +14,8 @@ from tqdm import tqdm
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from baselines.models.conv6 import SameDifferentCNN
+from baselines.models.conv6 import SameDifferentCNN as SameDifferentCNN_New
+from meta_baseline.models.conv6lr_old import SameDifferentCNN as SameDifferentCNN_Old
 from baselines.models.utils import SameDifferentDataset
 
 def evaluate_model(model, data_loader, device, verbose=True, max_batches=None):
@@ -94,6 +95,7 @@ def main(args):
     print(f"\nStarting cross-domain evaluation for experiment: {args.experiment_name}")
     print(f"  - {len(naturalistic_seeds)} naturalistic models (seeds: {naturalistic_seeds})")
     print(f"  - {len(pb_tasks)} PB tasks: {pb_tasks}")
+    print(f"  - Model architecture: {args.model_arch}")
     print(f"  - Model path template: {model_path_template}")
     print(f"  - Data directory: {args.data_dir}")
     print(f"  - Batch size: {args.batch_size}")
@@ -118,7 +120,13 @@ def main(args):
             print(f"WARNING: Model for seed {seed} not found at {model_path}. Skipping.")
             continue
             
-        model = SameDifferentCNN()
+        if args.model_arch == 'new':
+            model = SameDifferentCNN_New()
+        elif args.model_arch == 'old':
+            model = SameDifferentCNN_Old()
+        else:
+            raise ValueError(f"Unknown model architecture: {args.model_arch}")
+
         try:
             # Load checkpoint, handling potential DataParallel 'module.' prefix
             print("  Loading model state dict...")
@@ -199,6 +207,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate meta-trained naturalistic models on PB test sets.')
     parser.add_argument('--experiment_name', type=str, default='logs_naturalistic_meta_evaluation',
                         help='A name for the experiment, used for the output folder.')
+    parser.add_argument('--model_arch', type=str, default='old', choices=['new', 'old'],
+                        help="The model architecture to use ('new' or 'old').")
     parser.add_argument('--model_dir', type=str, 
                         default='/scratch/gpfs/mg7411/samedifferent/logs_naturalistic_meta/conv6lr', 
                         help='Directory containing the saved naturalistic models (seed folders).')
