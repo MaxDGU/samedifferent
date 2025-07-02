@@ -129,7 +129,6 @@ def main():
         ax.scatter(principal_components[indices, 0], principal_components[indices, 1], 
                    color=colors[label_type], label=label_type, s=130, alpha=0.8, marker=markers[label_type])
 
-    ax.set_title('PCA of Conv6 Weights: Meta vs. Vanilla vs. Single-Task', fontsize=20, pad=20)
     ax.set_xlabel(f'Principal Component 1 ({pca.explained_variance_ratio_[0]:.1%})', fontsize=16)
     ax.set_ylabel(f'Principal Component 2 ({pca.explained_variance_ratio_[1]:.1%})', fontsize=16)
     
@@ -169,9 +168,9 @@ def main():
         x_range = inset_xlim[1] - inset_xlim[0]
         y_range = inset_ylim[1] - inset_ylim[0]
         
-        # Jitter is now 4% of the inset's width/height for better visibility
-        x_jitter = np.random.normal(0, x_range * 0.04, size=len(single_task_indices))
-        y_jitter = np.random.normal(0, y_range * 0.04, size=len(single_task_indices))
+        # Jitter is now 5% of the inset's width/height for better visibility
+        x_jitter = np.random.normal(0, x_range * 0.05, size=len(single_task_indices))
+        y_jitter = np.random.normal(0, y_range * 0.05, size=len(single_task_indices))
         
         jittered_x = single_task_pcs[:, 0] + x_jitter
         jittered_y = single_task_pcs[:, 1] + y_jitter
@@ -189,12 +188,12 @@ def main():
     # Draw a box showing the zoomed area on the main plot
     mark_inset(ax, ax_inset, loc1=3, loc2=4, fc="none", ec="0.5")
 
-    # Add the legend to the main plot
-    ax.legend(title='Training Type', fontsize=14, title_fontsize=14, loc='lower right')
+    # Add the legend to the main plot, moved up
+    ax.legend(title='Training Type', fontsize=14, title_fontsize=14, loc='center right')
 
     output_dir = 'visualizations/pca_analysis'
     os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, 'pca_with_inset_final_v4.png')
+    save_path = os.path.join(output_dir, 'pca_with_inset_final.png')
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
     print(f"PCA plot with corrected inset saved to {save_path}")
