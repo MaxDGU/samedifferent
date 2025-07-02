@@ -53,13 +53,14 @@ def main(args):
     os.makedirs(args.output_dir, exist_ok=True)
 
     # --- Define Model and Data Paths ---
-    naturalistic_seeds = [43, 44, 45] # As discovered, only 3 seeds are available
+    naturalistic_seeds = [0, 1, 2, 3, 4] # Use the new seeds
     pb_tasks = [
         'original', 'filled', 'irregular', 'arrows', 'random_color', 
         'scrambled', 'wider_line', 'open', 'lines', 'regular'
     ]
     
-    model_path_template = os.path.join(args.model_dir, 'seed_{seed}', 'best_model.pt')
+    # Updated template for the new, nested path structure
+    model_path_template = os.path.join(args.model_dir, 'seed_{seed}', 'conv6lr', 'seed_{seed}', 'conv6lr_best.pth')
 
     # --- Evaluation Loop ---
     all_results = {}
@@ -128,7 +129,8 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate meta-trained naturalistic models on PB test sets.')
-    parser.add_argument('--model_dir', type=str, default='results/naturalistic/conv6/', 
+    parser.add_argument('--model_dir', type=str, 
+                        default='/scratch/gpfs/mg7411/samedifferent/naturalistic/results_meta_della/conv6lr', 
                         help='Directory containing the saved naturalistic models (seed folders).')
     parser.add_argument('--data_dir', type=str, default='data/vanilla_h5/results_problem_1/', 
                         help='Directory containing the PB task HDF5 files.')
