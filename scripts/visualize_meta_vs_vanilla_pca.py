@@ -139,30 +139,13 @@ def main():
                           bbox_to_anchor=(0.05, 0.05, 1, 1),
                           bbox_transform=ax.transAxes, borderpad=2)
 
-    # Plot the clustered data on the inset axes
+    # Plot the meta-trained models in the inset
     meta_indices = [i for i, l in enumerate(labels) if l == 'Meta-Trained']
     if meta_indices:
         ax_inset.scatter(principal_components[meta_indices, 0], principal_components[meta_indices, 1],
-                         color=colors['Meta-Trained'], marker=markers['Meta-Trained'], s=130, alpha=0.8, label='Meta-Trained')
+                         color=colors['Meta-Trained'], marker=markers['Meta-Trained'], s=130, alpha=0.8)
 
-    single_task_indices = [i for i, l in enumerate(labels) if l == 'Single-Task']
-    if single_task_indices:
-        single_task_pcs = principal_components[single_task_indices]
-        
-        # Define the zoom region for jitter calculation
-        x_min, x_max = single_task_pcs[:, 0].min(), single_task_pcs[:, 0].max()
-        y_min, y_max = single_task_pcs[:, 1].min(), single_task_pcs[:, 1].max()
-        x_range = (x_max - x_min) if (x_max - x_min) > 0 else 1.0
-        y_range = (y_max - y_min) if (y_max - y_min) > 0 else 1.0
-
-        # Add jitter to single-task points to make them visible
-        x_jitter = np.random.normal(0, x_range * 0.1, size=len(single_task_indices))
-        y_jitter = np.random.normal(0, y_range * 0.1, size=len(single_task_indices))
-        
-        ax_inset.scatter(single_task_pcs[:, 0] + x_jitter, single_task_pcs[:, 1] + y_jitter,
-                         color=colors['Single-Task'], marker=markers['Single-Task'], s=130, alpha=0.8, label='Single-Task')
-
-    # Define the region of interest for the zoom
+    # Define the zoom area based on the cluster
     cluster_indices = [i for i, l in enumerate(labels) if l in ['Meta-Trained', 'Single-Task']]
     if cluster_indices:
         x_min_zoom = principal_components[cluster_indices, 0].min()
@@ -170,13 +153,38 @@ def main():
         y_min_zoom = principal_components[cluster_indices, 1].min()
         y_max_zoom = principal_components[cluster_indices, 1].max()
 
-        # Add some padding to the zoom area
         x_padding = (x_max_zoom - x_min_zoom) * 0.5
         y_padding = (y_max_zoom - y_min_zoom) * 0.5
         
         ax_inset.set_xlim(x_min_zoom - x_padding, x_max_zoom + x_padding)
         ax_inset.set_ylim(y_min_zoom - y_padding, y_max_zoom + y_padding)
 
+    # Now, calculate jitter based on the inset's visible scale
+    single_task_indices = [i for i, l in enumerate(labels) if l == 'Single-Task']
+    if single_task_indices:
+        single_task_pcs = principal_components[single_task_indices]
+        
+        inset_xlim = ax_inset.get_xlim()
+        inset_ylim = ax_inset.get_ylim()
+        x_range = inset_xlim[1] - inset_xlim[0]
+        y_range = inset_ylim[1] - inset_ylim[0]
+        
+        # Jitter is 2% of the inset's width/height
+        x_jitter = np.random.normal(0, x_range * 0.02, size=len(single_task_indices))
+        y_jitter = np.random.normal(0, y_range * 0.02, size=len(single_task_indices))
+        
+        jittered_x = single_task_pcs[:, 0] + x_jitter
+        jittered_y = single_task_pcs[:, 1] + y_jitter
+        
+        ax_inset.scatter(jittered_x, jittered_y,
+                         color=colors['Single-Task'], marker=markers['Single-Task'], s=130, alpha=0.8)
+        
+        # Add annotations next to the jittered points
+        single_task_annotations = [ann for i, ann in enumerate(annotations) if labels[i] == 'Single-Task']
+        for i, txt in enumerate(single_task_annotations):
+             ax_inset.text(jittered_x[i] + x_range * 0.01, jittered_y[i], txt, fontsize=8, ha='left', va='center')
+
+    ax_inset.set_title('Meta/Single-Task Cluster', fontsize=10)
     ax_inset.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
 
     # Draw a box showing the zoomed area on the main plot
@@ -187,7 +195,7 @@ def main():
 
     output_dir = 'visualizations/pca_analysis'
     os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, 'pca_with_inset_final.png')
+    save_path = os.path.join(output_dir, 'pca_with_inset_final_v2.png')
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
     print(f"PCA plot with corrected inset saved to {save_path}")
