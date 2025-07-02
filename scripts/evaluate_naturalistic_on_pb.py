@@ -10,6 +10,7 @@ from pathlib import Path
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import learn2learn as l2l
+import torch.nn.functional as F
 
 # --- Path Setup ---
 project_root = Path(__file__).resolve().parent.parent
@@ -18,6 +19,33 @@ sys.path.insert(0, str(project_root))
 from baselines.models.conv6 import SameDifferentCNN as SameDifferentCNN_New
 from meta_baseline.models.conv6lr_old import SameDifferentCNN as SameDifferentCNN_Old
 from baselines.models.utils import SameDifferentDataset
+
+def collate_episodes(batch):
+    """Collates a list of episodes into a single batch of tensors."""
+    if not batch:
+        return None
+    
+    # The dataloader can sometimes wrap the batch in an extra list.
+    if isinstance(batch[0], list) and len(batch) == 1:
+        batch = batch[0]
+
+    try:
+        support_images = torch.stack([item['support_images'] for item in batch])
+        support_labels = torch.stack([item['support_labels'] for item in batch])
+        query_images = torch.stack([item['query_images'] for item in batch])
+        query_labels = torch.stack([item['query_labels'] for item in batch])
+        tasks = [item['task'] for item in batch]
+    except KeyError as e:
+        print(f"KeyError: {e} not found in an item in the batch. Item keys: {batch[0].keys()}")
+        raise
+
+    return {
+        'support_images': support_images,
+        'support_labels': support_labels,
+        'query_images': query_images,
+        'query_labels': query_labels,
+        'task': tasks
+    }
 
 def evaluate_with_adaptation(maml, data_loader, device, adaptation_steps, verbose=True, max_batches=None):
     """Evaluates the model on a given test dataset with test-time adaptation."""
@@ -40,30 +68,38 @@ def evaluate_with_adaptation(maml, data_loader, device, adaptation_steps, verbos
             if verbose:
                 print(f"    Stopping evaluation after {max_batches} batches as requested.")
             break
+        
+        if batch is None:
+            continue
 
-        learner = maml.clone()
         support_images = batch['support_images'].to(device)
         support_labels = batch['support_labels'].to(device)
         query_images = batch['query_images'].to(device)
         query_labels = batch['query_labels'].to(device)
 
-        # Reshape for adaptation
-        num_support = support_images.size(1)
-        support_images = support_images.view(-1, *support_images.shape[2:])
-        support_labels = support_labels.view(-1)
+        # Iterate over each task in the meta-batch
+        meta_batch_size = support_images.size(0)
+        for i in range(meta_batch_size):
+            learner = maml.clone()
 
-        # Adapt the model
-        for _ in range(adaptation_steps):
-            preds = learner(support_images)
-            loss = F.cross_entropy(preds, support_labels)
-            learner.adapt(loss)
+            # Adapt the model for the current task
+            task_support_images = support_images[i]
+            task_support_labels = support_labels[i].squeeze(-1)
 
-        # Evaluate on the query set
-        with torch.no_grad():
-            query_preds = learner(query_images.view(-1, *query_images.shape[2:]))
-            _, predicted = torch.max(query_preds.data, 1)
-            total_samples += query_labels.numel()
-            total_correct += (predicted == query_labels.view(-1)).sum().item()
+            for _ in range(adaptation_steps):
+                preds = learner(task_support_images)
+                loss = F.cross_entropy(preds, task_support_labels)
+                learner.adapt(loss)
+
+            # Evaluate on the query set for the current task
+            with torch.no_grad():
+                task_query_images = query_images[i]
+                task_query_labels = query_labels[i].squeeze(-1)
+                
+                query_preds = learner(task_query_images)
+                _, predicted = torch.max(query_preds.data, 1)
+                total_samples += task_query_labels.numel()
+                total_correct += (predicted == task_query_labels).sum().item()
 
     accuracy = (total_correct / total_samples) * 100 if total_samples > 0 else 0
     
@@ -161,7 +197,7 @@ def main(args):
                     test_dataset, 
                     batch_size=args.batch_size, 
                     shuffle=False,
-                    collate_fn=lambda x: x
+                    collate_fn=collate_episodes
                 )
 
                 print(f"    Dataset loaded: {len(test_dataset)} episodes, {len(test_loader)} batches")
