@@ -176,6 +176,7 @@ def main(args):
             print(f"ERROR loading model for seed {seed}: {e}. Skipping.")
             continue
         
+        model.to(device)
         maml = l2l.algorithms.MAML(model, lr=args.inner_lr, first_order=False)
 
         seed_results = {}
