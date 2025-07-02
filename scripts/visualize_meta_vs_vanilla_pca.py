@@ -140,10 +140,27 @@ def main():
                           bbox_transform=ax.transAxes, borderpad=2)
 
     # Plot the clustered data on the inset axes
-    for label_type in ['Meta-Trained', 'Single-Task']:
-        indices = [i for i, l in enumerate(labels) if l == label_type]
-        ax_inset.scatter(principal_components[indices, 0], principal_components[indices, 1],
-                         color=colors[label_type], marker=markers[label_type], s=130, alpha=0.8)
+    meta_indices = [i for i, l in enumerate(labels) if l == 'Meta-Trained']
+    if meta_indices:
+        ax_inset.scatter(principal_components[meta_indices, 0], principal_components[meta_indices, 1],
+                         color=colors['Meta-Trained'], marker=markers['Meta-Trained'], s=130, alpha=0.8, label='Meta-Trained')
+
+    single_task_indices = [i for i, l in enumerate(labels) if l == 'Single-Task']
+    if single_task_indices:
+        single_task_pcs = principal_components[single_task_indices]
+        
+        # Define the zoom region for jitter calculation
+        x_min, x_max = single_task_pcs[:, 0].min(), single_task_pcs[:, 0].max()
+        y_min, y_max = single_task_pcs[:, 1].min(), single_task_pcs[:, 1].max()
+        x_range = (x_max - x_min) if (x_max - x_min) > 0 else 1.0
+        y_range = (y_max - y_min) if (y_max - y_min) > 0 else 1.0
+
+        # Add jitter to single-task points to make them visible
+        x_jitter = np.random.normal(0, x_range * 0.1, size=len(single_task_indices))
+        y_jitter = np.random.normal(0, y_range * 0.1, size=len(single_task_indices))
+        
+        ax_inset.scatter(single_task_pcs[:, 0] + x_jitter, single_task_pcs[:, 1] + y_jitter,
+                         color=colors['Single-Task'], marker=markers['Single-Task'], s=130, alpha=0.8, label='Single-Task')
 
     # Define the region of interest for the zoom
     cluster_indices = [i for i, l in enumerate(labels) if l in ['Meta-Trained', 'Single-Task']]
@@ -154,8 +171,8 @@ def main():
         y_max_zoom = principal_components[cluster_indices, 1].max()
 
         # Add some padding to the zoom area
-        x_padding = (x_max_zoom - x_min_zoom) * 0.2
-        y_padding = (y_max_zoom - y_min_zoom) * 0.2
+        x_padding = (x_max_zoom - x_min_zoom) * 0.5
+        y_padding = (y_max_zoom - y_min_zoom) * 0.5
         
         ax_inset.set_xlim(x_min_zoom - x_padding, x_max_zoom + x_padding)
         ax_inset.set_ylim(y_min_zoom - y_padding, y_max_zoom + y_padding)
@@ -163,14 +180,14 @@ def main():
     ax_inset.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
 
     # Draw a box showing the zoomed area on the main plot
-    mark_inset(ax, ax_inset, loc1=1, loc2=3, fc="none", ec="0.5")
+    mark_inset(ax, ax_inset, loc1=2, loc2=4, fc="none", ec="0.5")
 
     # Add the legend to the main plot
-    ax.legend(title='Training Type', fontsize=14, title_fontsize=14)
+    ax.legend(title='Training Type', fontsize=14, title_fontsize=14, loc='upper left')
 
     output_dir = 'visualizations/pca_analysis'
     os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, 'pca_with_inset_fixed.png')
+    save_path = os.path.join(output_dir, 'pca_with_inset_final.png')
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
     print(f"PCA plot with corrected inset saved to {save_path}")
