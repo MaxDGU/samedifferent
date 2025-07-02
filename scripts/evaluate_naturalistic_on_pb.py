@@ -77,10 +77,12 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    output_path = os.path.join(args.output_dir, args.experiment_name)
+    os.makedirs(output_path, exist_ok=True)
+    print(f"Saving results to: {output_path}")
 
     # --- Define Model and Data Paths ---
-    naturalistic_seeds = [0, 1, 2, 3, 4] # Use the new seeds
+    naturalistic_seeds = args.seeds
     pb_tasks = [
         'original', 'filled', 'irregular', 'arrows', 'random_color', 
         'scrambled', 'wider_line', 'open', 'lines', 'regular'
@@ -89,7 +91,7 @@ def main(args):
     # Updated template for the new, nested path structure
     model_path_template = os.path.join(args.model_dir, 'seed_{seed}', 'conv6lr', 'seed_{seed}', 'conv6lr_best.pth')
 
-    print(f"\nStarting cross-domain evaluation:")
+    print(f"\nStarting cross-domain evaluation for experiment: {args.experiment_name}")
     print(f"  - {len(naturalistic_seeds)} naturalistic models (seeds: {naturalistic_seeds})")
     print(f"  - {len(pb_tasks)} PB tasks: {pb_tasks}")
     print(f"  - Model path template: {model_path_template}")
@@ -165,11 +167,11 @@ def main(args):
         return
 
     print(f"\n{'='*60}")
-    print("SAVING RESULTS")
+    print("SAVING RESULTS to {output_path}")
     print(f"{'='*60}")
 
     # Save detailed results to JSON
-    results_path = os.path.join(args.output_dir, 'naturalistic_on_pb_accuracies.json')
+    results_path = os.path.join(output_path, 'naturalistic_on_pb_accuracies.json')
     with open(results_path, 'w') as f:
         json.dump(all_results, f, indent=4)
     print(f"Detailed results saved to {results_path}")
@@ -188,15 +190,17 @@ def main(args):
     print(summary.round(2))
     
     # Save summary to CSV
-    summary_path = os.path.join(args.output_dir, 'naturalistic_on_pb_summary.csv')
+    summary_path = os.path.join(output_path, 'naturalistic_on_pb_summary.csv')
     summary.to_csv(summary_path)
     print(f"Summary saved to {summary_path}")
     
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate meta-trained naturalistic models on PB test sets.')
+    parser.add_argument('--experiment_name', type=str, default='logs_naturalistic_meta_evaluation',
+                        help='A name for the experiment, used for the output folder.')
     parser.add_argument('--model_dir', type=str, 
-                        default='/scratch/gpfs/mg7411/samedifferent/naturalistic/results_meta_della/conv6lr', 
+                        default='/scratch/gpfs/mg7411/samedifferent/logs_naturalistic_meta/conv6lr', 
                         help='Directory containing the saved naturalistic models (seed folders).')
     parser.add_argument('--data_dir', type=str, 
                         default='/scratch/gpfs/mg7411/samedifferent/data/meta_h5/pb', 
@@ -207,6 +211,8 @@ if __name__ == '__main__':
                         help='Batch size for evaluation.')
     parser.add_argument('--max_batches', type=int, default=30,
                         help='Maximum number of batches to evaluate per task. Set to 0 or None to evaluate all.')
+    parser.add_argument('--seeds', type=int, nargs='+', default=[111, 222, 333, 555, 999],
+                        help='List of seed numbers to evaluate.')
     parser.add_argument('--verbose', action='store_true', default=True,
                         help='Enable verbose output with detailed progress tracking.')
     
