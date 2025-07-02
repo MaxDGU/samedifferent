@@ -132,7 +132,8 @@ if __name__ == '__main__':
     parser.add_argument('--model_dir', type=str, 
                         default='/scratch/gpfs/mg7411/samedifferent/naturalistic/results_meta_della/conv6lr', 
                         help='Directory containing the saved naturalistic models (seed folders).')
-    parser.add_argument('--data_dir', type=str, default='data/vanilla_h5/results_problem_1/', 
+    parser.add_argument('--data_dir', type=str, 
+                        default='/scratch/gpfs/mg7411/samedifferent/data/meta_h5/pb', 
                         help='Directory containing the PB task HDF5 files.')
     parser.add_argument('--output_dir', type=str, default='results/cross_domain_evaluation/', 
                         help='Directory to save the results JSON file.')
