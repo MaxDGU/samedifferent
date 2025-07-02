@@ -44,6 +44,7 @@ def main():
     parser.add_argument('--improvement_threshold', type=float, default=0.02)
     parser.add_argument('--data_dir', type=str, default='data/meta_h5/pb')
     parser.add_argument('--output_dir', type=str, default='results/pb_baselines')
+    parser.add_argument('--dropout_rate_fc', type=float, default=0.5, help='Dropout rate for fully connected layers')
     args = parser.parse_args()
     
     # Define all PB tasks
@@ -73,11 +74,11 @@ def main():
     
     # Initialize model
     if args.architecture == 'conv2':
-        model = Conv2CNN()
+        model = Conv2CNN(dropout_rate_fc=args.dropout_rate_fc)
     elif args.architecture == 'conv4':
-        model = Conv4CNN()
+        model = Conv4CNN(dropout_rate_fc=args.dropout_rate_fc)
     else:  # conv6
-        model = Conv6CNN()
+        model = Conv6CNN(dropout_rate_fc=args.dropout_rate_fc)
     
     model = model.to(device)
     
