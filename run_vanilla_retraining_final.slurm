@@ -20,6 +20,9 @@ SEED=${SEEDS[$SLURM_ARRAY_TASK_ID]}
 source ~/.bashrc
 conda activate tensorflow
 
+# Change to the correct project directory
+cd /scratch/gpfs/mg7411/samedifferent/
+
 echo "Starting vanilla conv6 retraining..."
 echo "Seed: $SEED"
 echo "Architecture: conv6"
