@@ -17,7 +17,7 @@ sys.path.insert(0, str(project_root))
 from baselines.models.conv6 import SameDifferentCNN
 from baselines.models.utils import SameDifferentDataset
 
-def evaluate_model(model, data_loader, device, verbose=True):
+def evaluate_model(model, data_loader, device, verbose=True, max_batches=None):
     """Evaluates the model on a given test dataset."""
     model.eval()
     model.to(device)
@@ -25,13 +25,23 @@ def evaluate_model(model, data_loader, device, verbose=True):
     total_correct = 0
     total_samples = 0
     
-    if verbose:
+    num_batches_to_process = len(data_loader)
+    if max_batches is not None and max_batches < num_batches_to_process:
+        num_batches_to_process = max_batches
+        if verbose:
+            print(f"    Starting evaluation on a subset of {max_batches}/{len(data_loader)} batches...")
+    elif verbose:
         print(f"    Starting evaluation with {len(data_loader)} batches...")
     
     start_time = time.time()
     
     with torch.no_grad():
-        for batch_idx, batch in enumerate(tqdm(data_loader, desc="    Evaluating batches", leave=False) if verbose else data_loader):
+        for batch_idx, batch in enumerate(tqdm(data_loader, desc="    Evaluating batches", total=num_batches_to_process, leave=False) if verbose else data_loader):
+            if max_batches is not None and batch_idx >= max_batches:
+                if verbose:
+                    print(f"    Stopping evaluation after {max_batches} batches as requested.")
+                break
+
             # The SameDifferentDataset returns a dictionary with 'image' and 'label' keys
             images = batch['image'].to(device)
             labels = batch['label'].to(device)
@@ -52,7 +62,7 @@ def evaluate_model(model, data_loader, device, verbose=True):
             if verbose and batch_idx > 0 and batch_idx % 50 == 0:
                 current_acc = (total_correct / total_samples) * 100
                 elapsed = time.time() - start_time
-                print(f"    Batch {batch_idx}/{len(data_loader)}: Current accuracy: {current_acc:.2f}% ({total_correct}/{total_samples}) - {elapsed:.1f}s elapsed")
+                print(f"    Batch {batch_idx}/{num_batches_to_process}: Current accuracy: {current_acc:.2f}% ({total_correct}/{total_samples}) - {elapsed:.1f}s elapsed")
     
     accuracy = (total_correct / total_samples) * 100 if total_samples > 0 else 0
     
@@ -85,6 +95,8 @@ def main(args):
     print(f"  - Model path template: {model_path_template}")
     print(f"  - Data directory: {args.data_dir}")
     print(f"  - Batch size: {args.batch_size}")
+    if args.max_batches:
+        print(f"  - Evaluating on a subset of {args.max_batches} batches per task.")
 
     # --- Evaluation Loop ---
     all_results = {}
@@ -136,7 +148,7 @@ def main(args):
             # --- Evaluate and Store Accuracy ---
             print(f"    Evaluating model on task '{task}'...")
             start_time = time.time()
-            accuracy = evaluate_model(model, test_loader, device, verbose=args.verbose)
+            accuracy = evaluate_model(model, test_loader, device, verbose=args.verbose, max_batches=args.max_batches)
             elapsed = time.time() - start_time
             
             seed_results[task] = accuracy
@@ -193,8 +205,12 @@ if __name__ == '__main__':
                         help='Directory to save the results JSON file.')
     parser.add_argument('--batch_size', type=int, default=16, 
                         help='Batch size for evaluation.')
+    parser.add_argument('--max_batches', type=int, default=30,
+                        help='Maximum number of batches to evaluate per task. Set to 0 or None to evaluate all.')
     parser.add_argument('--verbose', action='store_true', default=True,
                         help='Enable verbose output with detailed progress tracking.')
     
     args = parser.parse_args()
+    if args.max_batches == 0:
+        args.max_batches = None
     main(args) 
