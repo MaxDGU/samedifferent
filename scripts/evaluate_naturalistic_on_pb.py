@@ -89,7 +89,7 @@ def main(args):
             # --- Load PB Task Data ---
             try:
                 # We use support_size=20 as a typical test episode size for PB tasks
-                test_dataset = SameDifferentDataset(args.data_dir, tasks=[task], split='test', support_sizes=[20])
+                test_dataset = SameDifferentDataset(args.data_dir, task_names=[task], split='test', support_sizes=[20])
                 test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
             except ValueError as e:
                 print(f"Warning: Could not load data for task '{task}'. Skipping. Error: {e}")
