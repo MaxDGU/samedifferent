@@ -134,10 +134,8 @@ def main():
     ax.set_ylabel(f'Principal Component 2 ({pca.explained_variance_ratio_[1]:.1%})', fontsize=16)
     
     # --- Create a zoomed-in inset plot for the cluster ---
-    # Create the inset axes in the upper-left corner, making it smaller
-    ax_inset = inset_axes(ax, width="35%", height="35%", loc='upper left',
-                          bbox_to_anchor=(0.05, 0, 0, 0.95),
-                          bbox_transform=ax.transAxes, borderpad=2)
+    # Manually place the inset in the upper left, with a balanced size
+    ax_inset = inset_axes(ax, width="40%", height="40%", loc='upper left')
 
     # Plot the meta-trained models in the inset
     meta_indices = [i for i, l in enumerate(labels) if l == 'Meta-Trained']
@@ -184,9 +182,8 @@ def main():
         # Add annotations next to the jittered points
         single_task_annotations = [ann for i, ann in enumerate(annotations) if labels[i] == 'Single-Task']
         for i, txt in enumerate(single_task_annotations):
-             ax_inset.text(jittered_x[i] + x_range * 0.015, jittered_y[i], txt, fontsize=7, ha='left', va='center')
+             ax_inset.text(jittered_x[i] + x_range * 0.015, jittered_y[i], txt, fontsize=8, ha='left', va='center')
 
-    ax_inset.set_title('Meta/Single-Task Cluster', fontsize=10)
     ax_inset.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
 
     # Draw a box showing the zoomed area on the main plot
@@ -197,7 +194,7 @@ def main():
 
     output_dir = 'visualizations/pca_analysis'
     os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, 'pca_with_inset_final_v3.png')
+    save_path = os.path.join(output_dir, 'pca_with_inset_final_v4.png')
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
     print(f"PCA plot with corrected inset saved to {save_path}")
