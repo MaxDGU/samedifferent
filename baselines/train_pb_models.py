@@ -149,16 +149,24 @@ def main():
     else:
         print("No best model found, using final model state")
     
-    test_loss, test_acc = validate_epoch(model, test_loader, criterion, device)
-    print(f'\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc:.2f}%')
-    
+    print("\n--- Starting Final Evaluation on All Tasks ---")
+    test_results = {}
+    for task in PB_TASKS:
+        print(f"\nTesting on task: {task}")
+        # Each task needs its own dataset and dataloader for testing
+        test_dataset = SameDifferentDataset(args.data_dir, task, split='test')
+        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+        
+        test_loss, test_acc = validate_epoch(model, test_loader, criterion, device)
+        test_results[task] = {'test_loss': test_loss, 'test_acc': test_acc}
+        print(f'Test Loss for {task}: {test_loss:.4f} | Test Acc for {task}: {test_acc:.2f}%')
+
     # Save metrics
     metrics = {
         'args': vars(args),
         'training_history': training_history,
         'best_val_acc': best_val_acc,
-        'test_loss': test_loss,
-        'test_acc': test_acc,
+        'test_results': test_results,
         'total_epochs': epoch + 1
     }
     
