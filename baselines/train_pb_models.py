@@ -10,9 +10,14 @@ from tqdm import tqdm
 import random
 import argparse
 from PIL import Image
-from models.conv2 import SameDifferentCNN as Conv2CNN
-from models.conv4 import SameDifferentCNN as Conv4CNN
-from models.conv6 import SameDifferentCNN as Conv6CNN
+import sys
+
+# Add meta_baseline to path to import the new architectures that match meta models
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+from meta_baseline.models.conv2lr import SameDifferentCNN as Conv2CNN
+from meta_baseline.models.conv4lr import SameDifferentCNN as Conv4CNN
+from meta_baseline.models.conv6lr import SameDifferentCNN as Conv6CNN
 from models.utils import SameDifferentDataset, train_epoch, validate_epoch, EarlyStopping
 
 def set_seed(seed):
