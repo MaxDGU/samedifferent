@@ -88,8 +88,8 @@ def main(args):
         for task in tqdm(pb_tasks, desc=f"Evaluating Seed {seed}", leave=False):
             # --- Load PB Task Data ---
             try:
-                # We use support_size=20 as a typical test episode size for PB tasks
-                test_dataset = SameDifferentDataset(args.data_dir, task_names=[task], split='test', support_sizes=[20])
+                # Correctly set the support sizes to match the available test data
+                test_dataset = SameDifferentDataset(args.data_dir, task_names=[task], split='test', support_sizes=[4, 6, 8, 10])
                 test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
             except ValueError as e:
                 print(f"Warning: Could not load data for task '{task}'. Skipping. Error: {e}")
