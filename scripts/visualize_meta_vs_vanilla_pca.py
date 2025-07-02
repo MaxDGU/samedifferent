@@ -5,7 +5,7 @@ from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import sys
 from collections import OrderedDict
-from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes, mark_inset
+from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes, mark_inset, inset_axes
 
 # Add project root to path to allow imports
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -123,19 +123,29 @@ def main():
     colors = {'Meta-Trained': 'blue', 'Vanilla': 'red', 'Single-Task': 'green'}
     markers = {'Meta-Trained': '^', 'Vanilla': 'o', 'Single-Task': 's'}
     
+    # Plot all data points on the main axes
     for label_type in np.unique(labels):
         indices = [i for i, l in enumerate(labels) if l == label_type]
         ax.scatter(principal_components[indices, 0], principal_components[indices, 1], 
                    color=colors[label_type], label=label_type, s=130, alpha=0.8, marker=markers[label_type])
 
-    # Add annotations for each point
-    for i, annotation in enumerate(annotations):
-        # Only add annotations for the more spread out 'Vanilla' points on the main plot
-        if labels[i] == 'Vanilla':
-            ax.text(principal_components[i, 0], principal_components[i, 1] + 50, annotation, fontsize=9, ha='center')
-
+    ax.set_title('PCA of Conv6 Weights: Meta vs. Vanilla vs. Single-Task', fontsize=20, pad=20)
+    ax.set_xlabel(f'Principal Component 1 ({pca.explained_variance_ratio_[0]:.1%})', fontsize=16)
+    ax.set_ylabel(f'Principal Component 2 ({pca.explained_variance_ratio_[1]:.1%})', fontsize=16)
+    
     # --- Create a zoomed-in inset plot for the cluster ---
-    # Define the region of interest based on the cluster
+    # Create the inset axes in the lower-left corner
+    ax_inset = inset_axes(ax, width="45%", height="45%", loc='lower left',
+                          bbox_to_anchor=(0.05, 0.05, 1, 1),
+                          bbox_transform=ax.transAxes, borderpad=2)
+
+    # Plot the clustered data on the inset axes
+    for label_type in ['Meta-Trained', 'Single-Task']:
+        indices = [i for i, l in enumerate(labels) if l == label_type]
+        ax_inset.scatter(principal_components[indices, 0], principal_components[indices, 1],
+                         color=colors[label_type], marker=markers[label_type], s=130, alpha=0.8)
+
+    # Define the region of interest for the zoom
     cluster_indices = [i for i, l in enumerate(labels) if l in ['Meta-Trained', 'Single-Task']]
     if cluster_indices:
         x_min_zoom = principal_components[cluster_indices, 0].min()
@@ -143,45 +153,27 @@ def main():
         y_min_zoom = principal_components[cluster_indices, 1].min()
         y_max_zoom = principal_components[cluster_indices, 1].max()
 
-        # Add some padding
-        x_padding = (x_max_zoom - x_min_zoom) * 0.1
-        y_padding = (y_max_zoom - y_min_zoom) * 0.1
-        x_min_zoom -= x_padding
-        x_max_zoom += x_padding
-        y_min_zoom -= y_padding
-        y_max_zoom += y_padding
+        # Add some padding to the zoom area
+        x_padding = (x_max_zoom - x_min_zoom) * 0.2
+        y_padding = (y_max_zoom - y_min_zoom) * 0.2
+        
+        ax_inset.set_xlim(x_min_zoom - x_padding, x_max_zoom + x_padding)
+        ax_inset.set_ylim(y_min_zoom - y_padding, y_max_zoom + y_padding)
 
-        # Create the inset axes
-        # The location (4) is 'lower right'. You can change this to 1, 2, or 3.
-        ax_inset = zoomed_inset_axes(ax, zoom=5, loc='lower left', borderpad=2)
+    ax_inset.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
 
-        # Plot the clustered data on the inset axes
-        for label_type in ['Meta-Trained', 'Single-Task']:
-            indices = [i for i, l in enumerate(labels) if l == label_type]
-            ax_inset.scatter(principal_components[indices, 0], principal_components[indices, 1],
-                             color=colors[label_type], marker=markers[label_type], s=130, alpha=0.8)
+    # Draw a box showing the zoomed area on the main plot
+    mark_inset(ax, ax_inset, loc1=1, loc2=3, fc="none", ec="0.5")
 
-        # Annotate points within the inset
-        for i in cluster_indices:
-            ax_inset.text(principal_components[i, 0], principal_components[i, 1] + 5, annotations[i],
-                          fontsize=9, ha='center')
+    # Add the legend to the main plot
+    ax.legend(title='Training Type', fontsize=14, title_fontsize=14)
 
-        # Set the limits and hide ticks for the inset
-        ax_inset.set_xlim(x_min_zoom, x_max_zoom)
-        ax_inset.set_ylim(y_min_zoom, y_max_zoom)
-        ax_inset.tick_params(axis='both', which='both', bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
-
-        # Draw a box showing the zoomed area and connection lines
-        mark_inset(ax, ax_inset, loc1=2, loc2=4, fc="none", ec="0.5")
-
-    ax.set_title('PCA of Conv6 Weights: Meta vs. Vanilla vs. Single-Task', fontsize=20, pad=20)
-    
     output_dir = 'visualizations/pca_analysis'
     os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, 'pca_with_inset.png')
+    save_path = os.path.join(output_dir, 'pca_with_inset_fixed.png')
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
-    print(f"PCA plot with inset saved to {save_path}")
+    print(f"PCA plot with corrected inset saved to {save_path}")
 
 if __name__ == '__main__':
     main() 
