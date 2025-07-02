@@ -5,6 +5,7 @@ import argparse
 import json
 import pandas as pd
 import sys
+import time
 from pathlib import Path
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -16,7 +17,7 @@ sys.path.insert(0, str(project_root))
 from baselines.models.conv6 import SameDifferentCNN
 from baselines.models.utils import SameDifferentDataset
 
-def evaluate_model(model, data_loader, device):
+def evaluate_model(model, data_loader, device, verbose=True):
     """Evaluates the model on a given test dataset."""
     model.eval()
     model.to(device)
@@ -24,8 +25,13 @@ def evaluate_model(model, data_loader, device):
     total_correct = 0
     total_samples = 0
     
+    if verbose:
+        print(f"    Starting evaluation with {len(data_loader)} batches...")
+    
+    start_time = time.time()
+    
     with torch.no_grad():
-        for batch in data_loader:
+        for batch_idx, batch in enumerate(tqdm(data_loader, desc="    Evaluating batches", leave=False) if verbose else data_loader):
             # The SameDifferentDataset returns a dictionary with 'image' and 'label' keys
             images = batch['image'].to(device)
             labels = batch['label'].to(device)
@@ -42,7 +48,18 @@ def evaluate_model(model, data_loader, device):
             total_samples += labels.size(0)
             total_correct += (predicted == labels).sum().item()
             
+            # Print progress every 50 batches
+            if verbose and batch_idx > 0 and batch_idx % 50 == 0:
+                current_acc = (total_correct / total_samples) * 100
+                elapsed = time.time() - start_time
+                print(f"    Batch {batch_idx}/{len(data_loader)}: Current accuracy: {current_acc:.2f}% ({total_correct}/{total_samples}) - {elapsed:.1f}s elapsed")
+    
     accuracy = (total_correct / total_samples) * 100 if total_samples > 0 else 0
+    
+    if verbose:
+        elapsed = time.time() - start_time
+        print(f"    Evaluation completed in {elapsed:.1f}s: {total_correct}/{total_samples} correct ({accuracy:.2f}%)")
+    
     return accuracy
 
 def main(args):
@@ -62,43 +79,71 @@ def main(args):
     # Updated template for the new, nested path structure
     model_path_template = os.path.join(args.model_dir, 'seed_{seed}', 'conv6lr', 'seed_{seed}', 'conv6lr_best.pth')
 
+    print(f"\nStarting cross-domain evaluation:")
+    print(f"  - {len(naturalistic_seeds)} naturalistic models (seeds: {naturalistic_seeds})")
+    print(f"  - {len(pb_tasks)} PB tasks: {pb_tasks}")
+    print(f"  - Model path template: {model_path_template}")
+    print(f"  - Data directory: {args.data_dir}")
+    print(f"  - Batch size: {args.batch_size}")
+
     # --- Evaluation Loop ---
     all_results = {}
+    total_evaluations = len(naturalistic_seeds) * len(pb_tasks)
+    completed_evaluations = 0
 
-    for seed in tqdm(naturalistic_seeds, desc="Processing Seeds"):
+    for seed_idx, seed in enumerate(naturalistic_seeds):
+        print(f"\n{'='*60}")
+        print(f"PROCESSING SEED {seed} ({seed_idx+1}/{len(naturalistic_seeds)})")
+        print(f"{'='*60}")
+        
         # --- Load Model ---
         model_path = model_path_template.format(seed=seed)
+        print(f"Loading model from: {model_path}")
+        
         if not os.path.exists(model_path):
-            print(f"Warning: Model for seed {seed} not found at {model_path}. Skipping.")
+            print(f"WARNING: Model for seed {seed} not found at {model_path}. Skipping.")
             continue
             
         model = SameDifferentCNN()
         try:
             # Load checkpoint, handling potential DataParallel 'module.' prefix
+            print("  Loading model state dict...")
             state_dict = torch.load(model_path, map_location='cpu')
             if 'model_state_dict' in state_dict:
                 state_dict = state_dict['model_state_dict']
             state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
             model.load_state_dict(state_dict, strict=False)
+            print("  Model loaded successfully!")
         except Exception as e:
-            print(f"Error loading model for seed {seed}: {e}. Skipping.")
+            print(f"ERROR loading model for seed {seed}: {e}. Skipping.")
             continue
 
         seed_results = {}
-        for task in tqdm(pb_tasks, desc=f"Evaluating Seed {seed}", leave=False):
+        for task_idx, task in enumerate(pb_tasks):
+            print(f"\n  Task {task} ({task_idx+1}/{len(pb_tasks)}):")
+            
             # --- Load PB Task Data ---
             try:
+                print(f"    Loading dataset for task '{task}'...")
                 # Correctly set the support sizes to match the available test data
                 test_dataset = SameDifferentDataset(args.data_dir, task_names=[task], split='test', support_sizes=[4, 6, 8, 10])
                 test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+                print(f"    Dataset loaded: {len(test_dataset)} samples, {len(test_loader)} batches")
             except ValueError as e:
-                print(f"Warning: Could not load data for task '{task}'. Skipping. Error: {e}")
+                print(f"    WARNING: Could not load data for task '{task}'. Skipping. Error: {e}")
                 continue
 
             # --- Evaluate and Store Accuracy ---
-            accuracy = evaluate_model(model, test_loader, device)
+            print(f"    Evaluating model on task '{task}'...")
+            start_time = time.time()
+            accuracy = evaluate_model(model, test_loader, device, verbose=args.verbose)
+            elapsed = time.time() - start_time
+            
             seed_results[task] = accuracy
-            print(f"  Seed {seed} | Task: {task:12} | Accuracy: {accuracy:.2f}%")
+            completed_evaluations += 1
+            
+            print(f"  ✓ Seed {seed} | Task: {task:12} | Accuracy: {accuracy:.2f}% | Time: {elapsed:.1f}s")
+            print(f"    Progress: {completed_evaluations}/{total_evaluations} evaluations completed ({100*completed_evaluations/total_evaluations:.1f}%)")
 
         all_results[f'seed_{seed}'] = seed_results
 
@@ -107,11 +152,15 @@ def main(args):
         print("\nNo models were evaluated. Exiting.")
         return
 
+    print(f"\n{'='*60}")
+    print("SAVING RESULTS")
+    print(f"{'='*60}")
+
     # Save detailed results to JSON
     results_path = os.path.join(args.output_dir, 'naturalistic_on_pb_accuracies.json')
     with open(results_path, 'w') as f:
         json.dump(all_results, f, indent=4)
-    print(f"\nDetailed results saved to {results_path}")
+    print(f"Detailed results saved to {results_path}")
 
     # Create and print a summary DataFrame
     df = pd.DataFrame(all_results).T # Transpose to have seeds as rows
@@ -126,6 +175,11 @@ def main(args):
     print("\n--- Summary of Accuracies (%) ---")
     print(summary.round(2))
     
+    # Save summary to CSV
+    summary_path = os.path.join(args.output_dir, 'naturalistic_on_pb_summary.csv')
+    summary.to_csv(summary_path)
+    print(f"Summary saved to {summary_path}")
+    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate meta-trained naturalistic models on PB test sets.')
@@ -139,6 +193,8 @@ if __name__ == '__main__':
                         help='Directory to save the results JSON file.')
     parser.add_argument('--batch_size', type=int, default=16, 
                         help='Batch size for evaluation.')
+    parser.add_argument('--verbose', action='store_true', default=True,
+                        help='Enable verbose output with detailed progress tracking.')
     
     args = parser.parse_args()
     main(args) 
