@@ -26,9 +26,9 @@ def evaluate_model(model, data_loader, device):
     
     with torch.no_grad():
         for batch in data_loader:
-            # The SameDifferentDataset returns a dictionary
-            images = batch['support_images'].to(device)
-            labels = batch['support_labels'].to(device)
+            # The SameDifferentDataset returns a dictionary with 'image' and 'label' keys
+            images = batch['image'].to(device)
+            labels = batch['label'].to(device)
             
             # The dataset loader might wrap batches in an extra dimension
             if images.dim() == 5: # (batch, num_images, channels, H, W)
