@@ -138,10 +138,46 @@ def main():
 
     output_dir = 'visualizations/pca_analysis'
     os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, 'pca_meta_vs_vanilla_vs_singletask.png')
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    full_plot_path = os.path.join(output_dir, 'pca_meta_vs_vanilla_vs_singletask.png')
+    plt.savefig(full_plot_path, dpi=300, bbox_inches='tight')
     
-    print(f"PCA plot saved to {save_path}")
+    print(f"Full PCA plot saved to {full_plot_path}")
+
+    # --- Create a zoomed-in version of the plot ---
+    print("Creating a zoomed-in version of the plot...")
+
+    # Identify the cluster of interest
+    cluster_indices = [i for i, l in enumerate(labels) if l in ['Meta-Trained', 'Single-Task']]
+    
+    if cluster_indices:
+        # Define the zoom boundaries based on the cluster and add padding
+        x_min_zoom = principal_components[cluster_indices, 0].min() - 50
+        x_max_zoom = principal_components[cluster_indices, 0].max() + 50
+        y_min_zoom = principal_components[cluster_indices, 1].min() - 50
+        y_max_zoom = principal_components[cluster_indices, 1].max() + 50
+        
+        ax.set_xlim(x_min_zoom, x_max_zoom)
+        ax.set_ylim(y_min_zoom, y_max_zoom)
+        
+        ax.set_title('PCA of Conv6 Weights (Zoomed on Meta/Single-Task Cluster)', fontsize=20, pad=20)
+        
+        # Clear previous annotations before replotting them for the new view
+        ax.texts.clear()
+        
+        # Recalculate a smaller offset for the zoomed plot annotations
+        y_range_zoom = y_max_zoom - y_min_zoom
+        new_offset = y_range_zoom * 0.01  # 1% of the new y-axis range
+
+        for i, annotation in enumerate(annotations):
+            # Only annotate points that are visible within the new zoomed window
+            if x_min_zoom <= principal_components[i, 0] <= x_max_zoom and \
+               y_min_zoom <= principal_components[i, 1] <= y_max_zoom:
+                ax.text(principal_components[i, 0], principal_components[i, 1] + new_offset, annotation, fontsize=9, ha='center')
+
+        zoomed_save_path = os.path.join(output_dir, 'pca_meta_vs_vanilla_vs_singletask_zoomed.png')
+        plt.savefig(zoomed_save_path, dpi=300, bbox_inches='tight')
+        
+        print(f"Zoomed PCA plot saved to {zoomed_save_path}")
 
 if __name__ == '__main__':
     main() 
