@@ -23,17 +23,17 @@ PB_TASKS = ['regular', 'lines', 'open', 'wider_line', 'scrambled', 'random_color
 
 class SameDifferentDataset(Dataset):
     """Dataset for PB tasks with balanced task representation."""
-    def __init__(self, data_dir, task_names, split='train', support_sizes=[4, 6, 8, 10], transform=None):
+    def __init__(self, data_dir, task_names, split='train', support_sizes=[4, 6, 8, 10], query_size=None, transform=None):
         self.data_dir = data_dir
         self.task_names = task_names if isinstance(task_names, list) else [task_names]
         self.split = split
         self.support_sizes = support_sizes
+        self.query_size = query_size
         self.transform = transform
         
-        self.task_data = {task: {'images': [], 'labels': []} for task in self.task_names}
-        #tasks are defined in a list from 
+        self.task_data = {task: {'episodes': []} for task in self.task_names}
+        
         for task_name in self.task_names:
-            #support sizes go from 4 to 10 in steps of 2
             for support_size in support_sizes:
                 filename = f"{task_name}_support{support_size}_{split}.h5"
                 filepath = os.path.join(data_dir, filename)
@@ -45,65 +45,46 @@ class SameDifferentDataset(Dataset):
                 print(f"Loading {filename}")
                 with h5py.File(filepath, 'r') as f:
                     num_episodes = f['support_images'].shape[0]
-                    
                     for episode_idx in range(num_episodes):
-                        support_images = f['support_images'][episode_idx]
-                        support_labels = f['support_labels'][episode_idx]
-                        query_images = f['query_images'][episode_idx]
-                        query_labels = f['query_labels'][episode_idx]
-                        
-                        all_images = np.concatenate([support_images, query_images])
-                        all_labels = np.concatenate([support_labels, query_labels])
-                        
-                        self.task_data[task_name]['images'].extend(all_images)
-                        self.task_data[task_name]['labels'].extend(all_labels)
+                        self.task_data[task_name]['episodes'].append({
+                            'support_images': f['support_images'][episode_idx],
+                            'support_labels': f['support_labels'][episode_idx],
+                            'query_images': f['query_images'][episode_idx],
+                            'query_labels': f['query_labels'][episode_idx],
+                        })
             
-            self.task_data[task_name]['images'] = np.array(self.task_data[task_name]['images'])
-            self.task_data[task_name]['labels'] = np.array(self.task_data[task_name]['labels'])
-            
-            print(f"Loaded {len(self.task_data[task_name]['images'])} images for task {task_name}")
-            print(f"Label distribution: {np.bincount(self.task_data[task_name]['labels'].astype(int))}")
-        
-        self.total_size = sum(len(data['images']) for data in self.task_data.values())
-        self.samples_per_task = min(len(data['images']) for data in self.task_data.values())
-        
-        self.task_indices = {
-            task: np.arange(len(data['images'])) 
-            for task, data in self.task_data.items()
-        }
-        
-        for indices in self.task_indices.values():
-            np.random.shuffle(indices)
-        
-        self.current_pos = {task: 0 for task in self.task_names}
+            print(f"Loaded {len(self.task_data[task_name]['episodes'])} episodes for task {task_name}")
+
+        self.episodes_per_task = {task: len(data['episodes']) for task, data in self.task_data.items()}
+        self.total_episodes = sum(self.episodes_per_task.values())
     
     def __len__(self):
-        #all tasks should have equal representation 
-        return self.samples_per_task * len(self.task_names)
+        return self.total_episodes
     
     def __getitem__(self, idx):
-        #lookup for task index 
-        task_idx = idx % len(self.task_names)
-        task_name = self.task_names[task_idx]
+        # Determine which task and episode this index corresponds to
+        task_name = None
+        for task, count in self.episodes_per_task.items():
+            if idx < count:
+                task_name = task
+                episode_idx = idx
+                break
+            idx -= count
         
-        pos = self.current_pos[task_name]
-        if pos >= len(self.task_indices[task_name]):
-            #reshuffle indices if we've gone through all samples
-            np.random.shuffle(self.task_indices[task_name])
-            self.current_pos[task_name] = 0
-            pos = 0
+        episode = self.task_data[task_name]['episodes'][episode_idx]
         
-        actual_idx = self.task_indices[task_name][pos]
-        self.current_pos[task_name] += 1
+        support_images = torch.FloatTensor(episode['support_images'].transpose(0, 3, 1, 2)) / 255.0
+        support_labels = torch.tensor(episode['support_labels'], dtype=torch.long)
+        query_images = torch.FloatTensor(episode['query_images'].transpose(0, 3, 1, 2)) / 255.0
+        query_labels = torch.tensor(episode['query_labels'], dtype=torch.long)
         
-        image = self.task_data[task_name]['images'][actual_idx]
-        label = self.task_data[task_name]['labels'][actual_idx]
-        
-        # Convert to float and normalize to [-1, 1]
-        image = torch.FloatTensor(image.transpose(2, 0, 1)) / 127.5 - 1.0
-        label = torch.tensor(int(label))
-        
-        return {'image': image, 'label': label, 'task': task_name}
+        return {
+            'support_images': support_images, 
+            'support_labels': support_labels,
+            'query_images': query_images,
+            'query_labels': query_labels,
+            'task': task_name
+        }
 
 def train_epoch(model, loader, criterion, optimizer, device):
     model.train()
@@ -169,7 +150,7 @@ class EarlyStopping:
         self.val_loss_min = np.Inf
         self.path = path
         self.delta = delta
-
+    
     def __call__(self, val_loss, model):
         score = -val_loss
         if self.best_score is None:

@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import learn2learn as l2l
 
 # --- Path Setup ---
 project_root = Path(__file__).resolve().parent.parent
@@ -18,11 +19,9 @@ from baselines.models.conv6 import SameDifferentCNN as SameDifferentCNN_New
 from meta_baseline.models.conv6lr_old import SameDifferentCNN as SameDifferentCNN_Old
 from baselines.models.utils import SameDifferentDataset
 
-def evaluate_model(model, data_loader, device, verbose=True, max_batches=None):
-    """Evaluates the model on a given test dataset."""
-    model.eval()
-    model.to(device)
-    
+def evaluate_with_adaptation(maml, data_loader, device, adaptation_steps, verbose=True, max_batches=None):
+    """Evaluates the model on a given test dataset with test-time adaptation."""
+    maml.eval()
     total_correct = 0
     total_samples = 0
     
@@ -36,35 +35,36 @@ def evaluate_model(model, data_loader, device, verbose=True, max_batches=None):
     
     start_time = time.time()
     
-    with torch.no_grad():
-        for batch_idx, batch in enumerate(tqdm(data_loader, desc="    Evaluating batches", total=num_batches_to_process, leave=False) if verbose else data_loader):
-            if max_batches is not None and batch_idx >= max_batches:
-                if verbose:
-                    print(f"    Stopping evaluation after {max_batches} batches as requested.")
-                break
+    for batch_idx, batch in enumerate(tqdm(data_loader, desc="    Adapting and Evaluating", total=num_batches_to_process, leave=False) if verbose else data_loader):
+        if max_batches is not None and batch_idx >= max_batches:
+            if verbose:
+                print(f"    Stopping evaluation after {max_batches} batches as requested.")
+            break
 
-            # The SameDifferentDataset returns a dictionary with 'image' and 'label' keys
-            images = batch['image'].to(device)
-            labels = batch['label'].to(device)
-            
-            # The dataset loader might wrap batches in an extra dimension
-            if images.dim() == 5: # (batch, num_images, channels, H, W)
-                bs, n_imgs, c, h, w = images.shape
-                images = images.view(bs * n_imgs, c, h, w)
-                labels = labels.view(bs * n_imgs)
+        learner = maml.clone()
+        support_images = batch['support_images'].to(device)
+        support_labels = batch['support_labels'].to(device)
+        query_images = batch['query_images'].to(device)
+        query_labels = batch['query_labels'].to(device)
 
-            outputs = model(images)
-            _, predicted = torch.max(outputs.data, 1)
-            
-            total_samples += labels.size(0)
-            total_correct += (predicted == labels).sum().item()
-            
-            # Print progress every 50 batches
-            if verbose and batch_idx > 0 and batch_idx % 50 == 0:
-                current_acc = (total_correct / total_samples) * 100
-                elapsed = time.time() - start_time
-                print(f"    Batch {batch_idx}/{num_batches_to_process}: Current accuracy: {current_acc:.2f}% ({total_correct}/{total_samples}) - {elapsed:.1f}s elapsed")
-    
+        # Reshape for adaptation
+        num_support = support_images.size(1)
+        support_images = support_images.view(-1, *support_images.shape[2:])
+        support_labels = support_labels.view(-1)
+
+        # Adapt the model
+        for _ in range(adaptation_steps):
+            preds = learner(support_images)
+            loss = F.cross_entropy(preds, support_labels)
+            learner.adapt(loss)
+
+        # Evaluate on the query set
+        with torch.no_grad():
+            query_preds = learner(query_images.view(-1, *query_images.shape[2:]))
+            _, predicted = torch.max(query_preds.data, 1)
+            total_samples += query_labels.numel()
+            total_correct += (predicted == query_labels.view(-1)).sum().item()
+
     accuracy = (total_correct / total_samples) * 100 if total_samples > 0 else 0
     
     if verbose:
@@ -139,6 +139,8 @@ def main(args):
         except Exception as e:
             print(f"ERROR loading model for seed {seed}: {e}. Skipping.")
             continue
+        
+        maml = l2l.algorithms.MAML(model, lr=args.inner_lr, first_order=False)
 
         seed_results = {}
         for task_idx, task in enumerate(pb_tasks):
@@ -147,18 +149,37 @@ def main(args):
             # --- Load PB Task Data ---
             try:
                 print(f"    Loading dataset for task '{task}'...")
-                # Correctly set the support sizes to match the available test data
-                test_dataset = SameDifferentDataset(args.data_dir, task_names=[task], split='test', support_sizes=[4, 6, 8, 10])
-                test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
-                print(f"    Dataset loaded: {len(test_dataset)} samples, {len(test_loader)} batches")
+                # The dataset must now provide support and query sets.
+                test_dataset = SameDifferentDataset(
+                    args.data_dir, 
+                    task_names=[task], 
+                    split='test', 
+                    support_sizes=args.support_sizes,
+                    query_size=args.query_size
+                )
+                test_loader = DataLoader(
+                    test_dataset, 
+                    batch_size=args.batch_size, 
+                    shuffle=False,
+                    collate_fn=l2l.data.MetaCollate(lambda x: x)
+                )
+
+                print(f"    Dataset loaded: {len(test_dataset)} episodes, {len(test_loader)} batches")
             except ValueError as e:
                 print(f"    WARNING: Could not load data for task '{task}'. Skipping. Error: {e}")
                 continue
 
             # --- Evaluate and Store Accuracy ---
-            print(f"    Evaluating model on task '{task}'...")
+            print(f"    Adapting and evaluating model on task '{task}'...")
             start_time = time.time()
-            accuracy = evaluate_model(model, test_loader, device, verbose=args.verbose, max_batches=args.max_batches)
+            accuracy = evaluate_with_adaptation(
+                maml, 
+                test_loader, 
+                device, 
+                adaptation_steps=args.adaptation_steps,
+                verbose=args.verbose, 
+                max_batches=args.max_batches
+            )
             elapsed = time.time() - start_time
             
             seed_results[task] = accuracy
@@ -217,12 +238,20 @@ if __name__ == '__main__':
                         help='Directory containing the PB task HDF5 files.')
     parser.add_argument('--output_dir', type=str, default='results/cross_domain_evaluation/', 
                         help='Directory to save the results JSON file.')
-    parser.add_argument('--batch_size', type=int, default=16, 
-                        help='Batch size for evaluation.')
+    parser.add_argument('--batch_size', type=int, default=4, 
+                        help='Meta-batch size for evaluation.')
     parser.add_argument('--max_batches', type=int, default=30,
                         help='Maximum number of batches to evaluate per task. Set to 0 or None to evaluate all.')
     parser.add_argument('--seeds', type=int, nargs='+', default=[111, 222, 333, 555, 999],
                         help='List of seed numbers to evaluate.')
+    parser.add_argument('--inner_lr', type=float, default=0.05,
+                        help='Inner-loop learning rate for adaptation.')
+    parser.add_argument('--adaptation_steps', type=int, default=5,
+                        help='Number of adaptation steps at test time.')
+    parser.add_argument('--support_sizes', type=int, nargs='+', default=[4, 6, 8, 10],
+                        help='Support set sizes to sample from.')
+    parser.add_argument('--query_size', type=int, default=16,
+                        help='Number of query examples per episode.')
     parser.add_argument('--verbose', action='store_true', default=True,
                         help='Enable verbose output with detailed progress tracking.')
     
