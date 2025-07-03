@@ -52,6 +52,20 @@ def load_model_weights(path, device):
         print(f"Error loading model at {path}: {e}. Skipping.")
         return None
 
+def generate_initial_weights(seed, device):
+    """Generate initial randomly initialized weights using the given seed."""
+    # Set the random seed for reproducible initialization
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    
+    # Create a new model with random initialization
+    model = SameDifferentCNN()
+    model.to(device)
+    
+    # Flatten all weights into a single vector
+    weights = [p.data.cpu().numpy().flatten() for p in model.parameters()]
+    return np.concatenate(weights)
+
 def main():
     """Main function to perform PCA and plot the results."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -93,6 +107,14 @@ def main():
             all_weights.append(weights)
             labels.append('Vanilla')
             annotations.append(f'seed {seed}')
+    
+    print("Generating initial weights for vanilla models...")
+    for seed in vanilla_seeds:
+        weights = generate_initial_weights(seed, device)
+        if weights is not None:
+            all_weights.append(weights)
+            labels.append('Initial')
+            annotations.append(f'seed {seed}')
             
     print("Loading single-task models...")
     for path, task in zip(single_task_paths, single_tasks):
@@ -120,8 +142,8 @@ def main():
     plt.style.use('seaborn-v0_8-whitegrid')
     fig, ax = plt.subplots(figsize=(14, 12))
     
-    colors = {'Meta-Trained': 'blue', 'Vanilla': 'red', 'Single-Task': 'green'}
-    markers = {'Meta-Trained': '^', 'Vanilla': 'o', 'Single-Task': 's'}
+    colors = {'Meta-Trained': 'blue', 'Vanilla': 'red', 'Single-Task': 'green', 'Initial': 'orange'}
+    markers = {'Meta-Trained': '^', 'Vanilla': 'o', 'Single-Task': 's', 'Initial': 'x'}
     
     # Plot all data points on the main axes
     for label_type in np.unique(labels):
@@ -193,10 +215,10 @@ def main():
 
     output_dir = 'visualizations/pca_analysis'
     os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, 'pca_with_inset_final.png')
+    save_path = os.path.join(output_dir, 'pca_with_inset_and_initial_weights.png')
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
-    print(f"PCA plot with corrected inset saved to {save_path}")
+    print(f"PCA plot with initial weights saved to {save_path}")
 
 if __name__ == '__main__':
-    main() 
+    main()
