@@ -91,44 +91,43 @@ class CircuitAnalyzer:
         episode_count = 0
         
         with torch.no_grad():
-            for batch in tqdm(data_loader, desc="Collecting activations"):
-                for episode in batch:
-                    if episode_count >= max_episodes:
-                        break
-                        
-                    # Clone learner for this episode
-                    learner = self.maml.clone()
-                    
-                    support_images = episode['support_images'].to(self.device)
-                    support_labels = episode['support_labels'].to(self.device)
-                    query_images = episode['query_images'].to(self.device)
-                    query_labels = episode['query_labels'].to(self.device)
-                    
-                    # Get pre-adaptation activations
-                    _ = learner(query_images)
-                    pre_activations = {k: v.cpu().numpy() for k, v in self.activation_store.items()}
-                    
-                    # Adapt the model
-                    for step in range(adaptation_steps):
-                        preds = learner(support_images)
-                        loss = F.cross_entropy(preds, support_labels)
-                        learner.adapt(loss, allow_unused=True)
-                    
-                    # Get post-adaptation activations
-                    _ = learner(query_images)
-                    post_activations = {k: v.cpu().numpy() for k, v in self.activation_store.items()}
-                    
-                    # Store activations by label
-                    labels_np = query_labels.cpu().numpy()
-                    for i, label in enumerate(labels_np):
-                        for layer_name in pre_activations:
-                            neuron_activations[f'{layer_name}_pre'][label].append(pre_activations[layer_name][i])
-                            neuron_activations[f'{layer_name}_post'][label].append(post_activations[layer_name][i])
-                    
-                    episode_count += 1
-                
+            for episode in tqdm(data_loader, desc="Collecting activations", total=min(len(data_loader), max_episodes)):
                 if episode_count >= max_episodes:
                     break
+                    
+                # Clone learner for this episode
+                learner = self.maml.clone()
+                
+                support_images = episode['support_images'].to(self.device).squeeze(0)
+                support_labels = episode['support_labels'].to(self.device).squeeze(0)
+                query_images = episode['query_images'].to(self.device).squeeze(0)
+                query_labels = episode['query_labels'].to(self.device).squeeze(0)
+                
+                # Get pre-adaptation activations
+                _ = learner(query_images)
+                pre_activations = {k: v.cpu().numpy() for k, v in self.activation_store.items()}
+                
+                # Adapt the model
+                for step in range(adaptation_steps):
+                    preds = learner(support_images)
+                    loss = F.cross_entropy(preds, support_labels)
+                    learner.adapt(loss, allow_unused=True)
+                
+                # Get post-adaptation activations
+                _ = learner(query_images)
+                post_activations = {k: v.cpu().numpy() for k, v in self.activation_store.items()}
+                
+                # Store activations by label
+                labels_np = query_labels.cpu().numpy()
+                for i, label in enumerate(labels_np):
+                    for layer_name in pre_activations:
+                        neuron_activations[f'{layer_name}_pre'][label].append(pre_activations[layer_name][i])
+                        neuron_activations[f'{layer_name}_post'][label].append(post_activations[layer_name][i])
+                
+                episode_count += 1
+            
+            if episode_count >= max_episodes:
+                break
         
         # Analyze selectivity for each layer and neuron
         selectivity_results = {}
@@ -216,41 +215,40 @@ class CircuitAnalyzer:
         episode_count = 0
         
         with torch.no_grad():
-            for batch in tqdm(data_loader, desc="Analyzing adaptation"):
-                for episode in batch:
-                    if episode_count >= max_episodes:
-                        break
+            for episode in tqdm(data_loader, desc="Analyzing adaptation", total=min(len(data_loader), max_episodes)):
+                if episode_count >= max_episodes:
+                    break
+                
+                learner = self.maml.clone()
+                
+                support_images = episode['support_images'].to(self.device).squeeze(0)
+                support_labels = episode['support_labels'].to(self.device).squeeze(0)
+                query_images = episode['query_images'].to(self.device).squeeze(0)
+                
+                # Track activations at each adaptation step
+                step_activations = []
+                
+                # Initial activations
+                _ = learner(query_images)
+                step_activations.append({k: v.mean(0).cpu().numpy() 
+                                       for k, v in self.activation_store.items()})
+                
+                # Adaptation steps
+                for step in range(adaptation_steps):
+                    preds = learner(support_images)
+                    loss = F.cross_entropy(preds, support_labels)
+                    learner.adapt(loss, allow_unused=True)
                     
-                    learner = self.maml.clone()
-                    
-                    support_images = episode['support_images'].to(self.device)
-                    support_labels = episode['support_labels'].to(self.device)
-                    query_images = episode['query_images'].to(self.device)
-                    
-                    # Track activations at each adaptation step
-                    step_activations = []
-                    
-                    # Initial activations
+                    # Capture activations after this step
                     _ = learner(query_images)
                     step_activations.append({k: v.mean(0).cpu().numpy() 
                                            for k, v in self.activation_store.items()})
-                    
-                    # Adaptation steps
-                    for step in range(adaptation_steps):
-                        preds = learner(support_images)
-                        loss = F.cross_entropy(preds, support_labels)
-                        learner.adapt(loss, allow_unused=True)
-                        
-                        # Capture activations after this step
-                        _ = learner(query_images)
-                        step_activations.append({k: v.mean(0).cpu().numpy() 
-                                               for k, v in self.activation_store.items()})
-                    
-                    adaptation_dynamics[episode['task'][0]].append(step_activations)
-                    episode_count += 1
                 
-                if episode_count >= max_episodes:
-                    break
+                adaptation_dynamics[episode['task'][0]].append(step_activations)
+                episode_count += 1
+            
+            if episode_count >= max_episodes:
+                break
         
         self.circuit_results['adaptation_dynamics'] = adaptation_dynamics
         return adaptation_dynamics
@@ -430,8 +428,7 @@ def main():
     
     dataset = SameDifferentDataset(
         args.data_dir, PB_TASKS, 'val', support_sizes=[args.support_size])
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False,
-                           collate_fn=collate_episodes)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     
     # Initialize analyzer
     analyzer = CircuitAnalyzer(args.model_path, device)
