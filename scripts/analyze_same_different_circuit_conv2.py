@@ -125,9 +125,6 @@ class CircuitAnalyzer:
                         neuron_activations[f'{layer_name}_post'][label].append(post_activations[layer_name][i])
                 
                 episode_count += 1
-            
-            if episode_count >= max_episodes:
-                break
         
         # Analyze selectivity for each layer and neuron
         selectivity_results = {}
@@ -246,9 +243,6 @@ class CircuitAnalyzer:
                 
                 adaptation_dynamics[episode['task'][0]].append(step_activations)
                 episode_count += 1
-            
-            if episode_count >= max_episodes:
-                break
         
         self.circuit_results['adaptation_dynamics'] = adaptation_dynamics
         return adaptation_dynamics
