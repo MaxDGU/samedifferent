@@ -20,14 +20,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from meta_baseline.models.conv2lr import SameDifferentCNN
 from meta_baseline.models.utils_meta import SameDifferentDataset
 
-# A minimal collate function for this experiment
-def collate_episodes(batch):
-    if not batch:
-        return None
-    if isinstance(batch[0], list) and len(batch) == 1:
-        batch = batch[0]
-    return batch
-
 class NeuronAblator:
     """
     Targeted ablation experiment for testing the causal role of critical neurons
@@ -156,7 +148,7 @@ def main():
     
     PB_TASKS = ["regular", "lines", "open", "wider_line", "scrambled", "random_color", "arrows", "irregular", "filled", "original"]
     dataset = SameDifferentDataset(args.data_dir, PB_TASKS, 'val', support_sizes=[args.support_size])
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=collate_episodes)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
     
     ablator = NeuronAblator(args.model_path, device)
     results = {}
