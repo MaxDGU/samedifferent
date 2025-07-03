@@ -52,43 +52,6 @@ def load_model_weights(path, device):
         print(f"Error loading model at {path}: {e}. Skipping.")
         return None
 
-def generate_initial_weights(seed, device):
-    """Generate initial randomly initialized weights using the given seed."""
-    try:
-        print(f"  Generating initial weights for seed {seed}...")
-        # Set all random seeds for reproducible initialization
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(seed)
-            torch.cuda.manual_seed_all(seed)
-        
-        # Create a new model with random initialization
-        model = SameDifferentCNN()
-        model.to(device)
-        
-        # Flatten all weights into a single vector
-        weights = [p.data.cpu().numpy().flatten() for p in model.parameters()]
-        flattened_weights = np.concatenate(weights)
-        
-        # Verify we have reasonable weights (not all zeros or NaN)
-        if np.all(flattened_weights == 0):
-            print(f"  Warning: All weights are zero for seed {seed}")
-            return None
-        if np.any(np.isnan(flattened_weights)):
-            print(f"  Warning: NaN weights detected for seed {seed}")
-            return None
-            
-        print(f"  Successfully generated {len(flattened_weights)} initial weights for seed {seed}")
-        print(f"  Weight stats: mean={flattened_weights.mean():.6f}, std={flattened_weights.std():.6f}")
-        return flattened_weights
-        
-    except Exception as e:
-        print(f"  Error generating initial weights for seed {seed}: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
 def main():
     """Main function to perform PCA and plot the results."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -130,20 +93,6 @@ def main():
             all_weights.append(weights)
             labels.append('Vanilla')
             annotations.append(f'seed {seed}')
-    
-    print("Generating initial weights for vanilla models...")
-    initial_weights_count = 0
-    for seed in vanilla_seeds:
-        weights = generate_initial_weights(seed, device)
-        if weights is not None:
-            all_weights.append(weights)
-            labels.append('Initial')
-            annotations.append(f'seed {seed}')
-            initial_weights_count += 1
-        else:
-            print(f"  Failed to generate initial weights for seed {seed}")
-    
-    print(f"Successfully generated {initial_weights_count} initial weight sets")
             
     print("Loading single-task models...")
     for path, task in zip(single_task_paths, single_tasks):
@@ -166,55 +115,24 @@ def main():
     pca = PCA(n_components=2)
     principal_components = pca.fit_transform(all_weights)
     print(f"Explained variance ratio: {pca.explained_variance_ratio_}")
-    
-    # Debug: Show coordinate ranges for each label type
-    print("\n=== PCA COORDINATE RANGES ===")
-    for label_type in np.unique(labels):
-        indices = [i for i, l in enumerate(labels) if l == label_type]
-        if indices:
-            pcs = principal_components[indices]
-            pc1_range = (pcs[:, 0].min(), pcs[:, 0].max())
-            pc2_range = (pcs[:, 1].min(), pcs[:, 1].max())
-            print(f"{label_type:12s}: PC1=[{pc1_range[0]:8.3f}, {pc1_range[1]:8.3f}], PC2=[{pc2_range[0]:8.3f}, {pc2_range[1]:8.3f}]")
-    
-    # Show overall ranges
-    overall_pc1_range = (principal_components[:, 0].min(), principal_components[:, 0].max())
-    overall_pc2_range = (principal_components[:, 1].min(), principal_components[:, 1].max())
-    print(f"{'Overall':12s}: PC1=[{overall_pc1_range[0]:8.3f}, {overall_pc1_range[1]:8.3f}], PC2=[{overall_pc2_range[0]:8.3f}, {overall_pc2_range[1]:8.3f}]")
-    
-    # If initial weights exist, show their specific coordinates
-    if 'Initial' in labels:
-        initial_indices = [i for i, l in enumerate(labels) if l == 'Initial']
-        print(f"\n=== INITIAL WEIGHTS COORDINATES ===")
-        for idx in initial_indices:
-            annotation = annotations[idx]
-            pc1, pc2 = principal_components[idx]
-            print(f"Initial {annotation}: PC1={pc1:8.3f}, PC2={pc2:8.3f}")
-    print("=" * 50)
 
     # --- Plot Results ---
     print("Plotting results...")
     plt.style.use('seaborn-v0_8-whitegrid')
     fig, ax = plt.subplots(figsize=(14, 12))
     
-    colors = {'Meta-Trained': 'blue', 'Vanilla': 'red', 'Single-Task': 'green', 'Initial': 'orange'}
-    markers = {'Meta-Trained': '^', 'Vanilla': 'o', 'Single-Task': 's', 'Initial': 'X'}  # Changed to capital X for better visibility
-    sizes = {'Meta-Trained': 130, 'Vanilla': 130, 'Single-Task': 130, 'Initial': 300}  # Much larger initial weights
+    colors = {'Meta-Trained': 'blue', 'Vanilla': 'red', 'Single-Task': 'green'}
+    markers = {'Meta-Trained': '^', 'Vanilla': 'o', 'Single-Task': 's'}
+    sizes = {'Meta-Trained': 130, 'Vanilla': 130, 'Single-Task': 130}
     
     # Plot all data points on the main axes
     for label_type in np.unique(labels):
         indices = [i for i, l in enumerate(labels) if l == label_type]
         print(f"Plotting {len(indices)} points for {label_type}")
         
-        # Special handling for initial weights - plot them last and with higher zorder
-        if label_type == 'Initial':
-            ax.scatter(principal_components[indices, 0], principal_components[indices, 1], 
-                       color=colors[label_type], label=label_type, s=sizes[label_type], 
-                       alpha=1.0, marker=markers[label_type], zorder=10, edgecolors='black', linewidth=2)
-        else:
-            ax.scatter(principal_components[indices, 0], principal_components[indices, 1], 
-                       color=colors[label_type], label=label_type, s=sizes[label_type], 
-                       alpha=0.8, marker=markers[label_type], zorder=5)
+        ax.scatter(principal_components[indices, 0], principal_components[indices, 1], 
+                   color=colors[label_type], label=label_type, s=sizes[label_type], 
+                   alpha=0.8, marker=markers[label_type])
 
     ax.set_xlabel(f'Principal Component 1 ({pca.explained_variance_ratio_[0]:.1%})', fontsize=16)
     ax.set_ylabel(f'Principal Component 2 ({pca.explained_variance_ratio_[1]:.1%})', fontsize=16)
@@ -229,15 +147,8 @@ def main():
         ax_inset.scatter(principal_components[meta_indices, 0], principal_components[meta_indices, 1],
                          color=colors['Meta-Trained'], marker=markers['Meta-Trained'], s=100, alpha=0.8)
 
-    # Also plot initial weights in the inset if they're in the clustered region
-    initial_indices = [i for i, l in enumerate(labels) if l == 'Initial']
-    if initial_indices:
-        ax_inset.scatter(principal_components[initial_indices, 0], principal_components[initial_indices, 1],
-                         color=colors['Initial'], marker=markers['Initial'], s=200, alpha=1.0, 
-                         zorder=10, edgecolors='black', linewidth=1)
-
-    # Define the zoom area based on ALL meta-trained and single-task models
-    cluster_indices = [i for i, l in enumerate(labels) if l in ['Meta-Trained', 'Single-Task', 'Initial']]
+    # Define the zoom area based on meta-trained and single-task models
+    cluster_indices = [i for i, l in enumerate(labels) if l in ['Meta-Trained', 'Single-Task']]
     if cluster_indices:
         # Get the PCs for all points that should be in the inset
         inset_pcs = principal_components[cluster_indices]
@@ -246,13 +157,13 @@ def main():
         y_min_zoom, y_max_zoom = inset_pcs[:, 1].min(), inset_pcs[:, 1].max()
 
         # Add padding
-        x_padding = (x_max_zoom - x_min_zoom) * 0.3  # Increased padding for better visibility
+        x_padding = (x_max_zoom - x_min_zoom) * 0.3
         y_padding = (y_max_zoom - y_min_zoom) * 0.3
         
         ax_inset.set_xlim(x_min_zoom - x_padding, x_max_zoom + x_padding)
         ax_inset.set_ylim(y_min_zoom - y_padding, y_max_zoom + y_padding)
 
-    # Now, calculate a stronger jitter based on the inset's visible scale
+    # Calculate jitter based on the inset's visible scale
     single_task_indices = [i for i, l in enumerate(labels) if l == 'Single-Task']
     if single_task_indices:
         single_task_pcs = principal_components[single_task_indices]
@@ -262,7 +173,7 @@ def main():
         x_range = inset_xlim[1] - inset_xlim[0]
         y_range = inset_ylim[1] - inset_ylim[0]
         
-        # Jitter is now 5% of the inset's width/height for better visibility
+        # Jitter is 5% of the inset's width/height for better visibility
         x_jitter = np.random.normal(0, x_range * 0.05, size=len(single_task_indices))
         y_jitter = np.random.normal(0, y_range * 0.05, size=len(single_task_indices))
         
@@ -282,22 +193,15 @@ def main():
     # Draw a box showing the zoomed area on the main plot
     mark_inset(ax, ax_inset, loc1=3, loc2=4, fc="none", ec="0.5")
 
-    # Add the legend to the main plot, moved up
+    # Add the legend to the main plot
     ax.legend(title='Training Type', fontsize=14, title_fontsize=14, loc='center right')
-    
-    # Add text annotation about initial weights if they exist
-    if 'Initial' in labels:
-        initial_count = labels.count('Initial')
-        ax.text(0.02, 0.98, f'Initial weights: {initial_count} orange X markers\n(may be clustered near origin)', 
-                transform=ax.transAxes, fontsize=10, verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
 
     output_dir = 'visualizations/pca_analysis'
     os.makedirs(output_dir, exist_ok=True)
-    save_path = os.path.join(output_dir, 'pca_with_inset_and_initial_weights.png')
+    save_path = os.path.join(output_dir, 'pca_meta_vs_vanilla_vs_single_task.png')
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
-    print(f"PCA plot with initial weights saved to {save_path}")
+    print(f"PCA plot saved to {save_path}")
 
 if __name__ == '__main__':
     main()
