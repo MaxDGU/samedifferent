@@ -166,6 +166,31 @@ def main():
     pca = PCA(n_components=2)
     principal_components = pca.fit_transform(all_weights)
     print(f"Explained variance ratio: {pca.explained_variance_ratio_}")
+    
+    # Debug: Show coordinate ranges for each label type
+    print("\n=== PCA COORDINATE RANGES ===")
+    for label_type in np.unique(labels):
+        indices = [i for i, l in enumerate(labels) if l == label_type]
+        if indices:
+            pcs = principal_components[indices]
+            pc1_range = (pcs[:, 0].min(), pcs[:, 0].max())
+            pc2_range = (pcs[:, 1].min(), pcs[:, 1].max())
+            print(f"{label_type:12s}: PC1=[{pc1_range[0]:8.3f}, {pc1_range[1]:8.3f}], PC2=[{pc2_range[0]:8.3f}, {pc2_range[1]:8.3f}]")
+    
+    # Show overall ranges
+    overall_pc1_range = (principal_components[:, 0].min(), principal_components[:, 0].max())
+    overall_pc2_range = (principal_components[:, 1].min(), principal_components[:, 1].max())
+    print(f"{'Overall':12s}: PC1=[{overall_pc1_range[0]:8.3f}, {overall_pc1_range[1]:8.3f}], PC2=[{overall_pc2_range[0]:8.3f}, {overall_pc2_range[1]:8.3f}]")
+    
+    # If initial weights exist, show their specific coordinates
+    if 'Initial' in labels:
+        initial_indices = [i for i, l in enumerate(labels) if l == 'Initial']
+        print(f"\n=== INITIAL WEIGHTS COORDINATES ===")
+        for idx in initial_indices:
+            annotation = annotations[idx]
+            pc1, pc2 = principal_components[idx]
+            print(f"Initial {annotation}: PC1={pc1:8.3f}, PC2={pc2:8.3f}")
+    print("=" * 50)
 
     # --- Plot Results ---
     print("Plotting results...")
@@ -173,14 +198,23 @@ def main():
     fig, ax = plt.subplots(figsize=(14, 12))
     
     colors = {'Meta-Trained': 'blue', 'Vanilla': 'red', 'Single-Task': 'green', 'Initial': 'orange'}
-    markers = {'Meta-Trained': '^', 'Vanilla': 'o', 'Single-Task': 's', 'Initial': 'x'}
+    markers = {'Meta-Trained': '^', 'Vanilla': 'o', 'Single-Task': 's', 'Initial': 'X'}  # Changed to capital X for better visibility
+    sizes = {'Meta-Trained': 130, 'Vanilla': 130, 'Single-Task': 130, 'Initial': 300}  # Much larger initial weights
     
     # Plot all data points on the main axes
     for label_type in np.unique(labels):
         indices = [i for i, l in enumerate(labels) if l == label_type]
         print(f"Plotting {len(indices)} points for {label_type}")
-        ax.scatter(principal_components[indices, 0], principal_components[indices, 1], 
-                   color=colors[label_type], label=label_type, s=130, alpha=0.8, marker=markers[label_type])
+        
+        # Special handling for initial weights - plot them last and with higher zorder
+        if label_type == 'Initial':
+            ax.scatter(principal_components[indices, 0], principal_components[indices, 1], 
+                       color=colors[label_type], label=label_type, s=sizes[label_type], 
+                       alpha=1.0, marker=markers[label_type], zorder=10, edgecolors='black', linewidth=2)
+        else:
+            ax.scatter(principal_components[indices, 0], principal_components[indices, 1], 
+                       color=colors[label_type], label=label_type, s=sizes[label_type], 
+                       alpha=0.8, marker=markers[label_type], zorder=5)
 
     ax.set_xlabel(f'Principal Component 1 ({pca.explained_variance_ratio_[0]:.1%})', fontsize=16)
     ax.set_ylabel(f'Principal Component 2 ({pca.explained_variance_ratio_[1]:.1%})', fontsize=16)
@@ -195,8 +229,15 @@ def main():
         ax_inset.scatter(principal_components[meta_indices, 0], principal_components[meta_indices, 1],
                          color=colors['Meta-Trained'], marker=markers['Meta-Trained'], s=100, alpha=0.8)
 
+    # Also plot initial weights in the inset if they're in the clustered region
+    initial_indices = [i for i, l in enumerate(labels) if l == 'Initial']
+    if initial_indices:
+        ax_inset.scatter(principal_components[initial_indices, 0], principal_components[initial_indices, 1],
+                         color=colors['Initial'], marker=markers['Initial'], s=200, alpha=1.0, 
+                         zorder=10, edgecolors='black', linewidth=1)
+
     # Define the zoom area based on ALL meta-trained and single-task models
-    cluster_indices = [i for i, l in enumerate(labels) if l in ['Meta-Trained', 'Single-Task']]
+    cluster_indices = [i for i, l in enumerate(labels) if l in ['Meta-Trained', 'Single-Task', 'Initial']]
     if cluster_indices:
         # Get the PCs for all points that should be in the inset
         inset_pcs = principal_components[cluster_indices]
@@ -205,8 +246,8 @@ def main():
         y_min_zoom, y_max_zoom = inset_pcs[:, 1].min(), inset_pcs[:, 1].max()
 
         # Add padding
-        x_padding = (x_max_zoom - x_min_zoom) * 0.2
-        y_padding = (y_max_zoom - y_min_zoom) * 0.2
+        x_padding = (x_max_zoom - x_min_zoom) * 0.3  # Increased padding for better visibility
+        y_padding = (y_max_zoom - y_min_zoom) * 0.3
         
         ax_inset.set_xlim(x_min_zoom - x_padding, x_max_zoom + x_padding)
         ax_inset.set_ylim(y_min_zoom - y_padding, y_max_zoom + y_padding)
@@ -243,6 +284,13 @@ def main():
 
     # Add the legend to the main plot, moved up
     ax.legend(title='Training Type', fontsize=14, title_fontsize=14, loc='center right')
+    
+    # Add text annotation about initial weights if they exist
+    if 'Initial' in labels:
+        initial_count = labels.count('Initial')
+        ax.text(0.02, 0.98, f'Initial weights: {initial_count} orange X markers\n(may be clustered near origin)', 
+                transform=ax.transAxes, fontsize=10, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
 
     output_dir = 'visualizations/pca_analysis'
     os.makedirs(output_dir, exist_ok=True)
