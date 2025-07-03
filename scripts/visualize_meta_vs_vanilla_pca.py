@@ -54,17 +54,40 @@ def load_model_weights(path, device):
 
 def generate_initial_weights(seed, device):
     """Generate initial randomly initialized weights using the given seed."""
-    # Set the random seed for reproducible initialization
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    
-    # Create a new model with random initialization
-    model = SameDifferentCNN()
-    model.to(device)
-    
-    # Flatten all weights into a single vector
-    weights = [p.data.cpu().numpy().flatten() for p in model.parameters()]
-    return np.concatenate(weights)
+    try:
+        print(f"  Generating initial weights for seed {seed}...")
+        # Set all random seeds for reproducible initialization
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+        
+        # Create a new model with random initialization
+        model = SameDifferentCNN()
+        model.to(device)
+        
+        # Flatten all weights into a single vector
+        weights = [p.data.cpu().numpy().flatten() for p in model.parameters()]
+        flattened_weights = np.concatenate(weights)
+        
+        # Verify we have reasonable weights (not all zeros or NaN)
+        if np.all(flattened_weights == 0):
+            print(f"  Warning: All weights are zero for seed {seed}")
+            return None
+        if np.any(np.isnan(flattened_weights)):
+            print(f"  Warning: NaN weights detected for seed {seed}")
+            return None
+            
+        print(f"  Successfully generated {len(flattened_weights)} initial weights for seed {seed}")
+        print(f"  Weight stats: mean={flattened_weights.mean():.6f}, std={flattened_weights.std():.6f}")
+        return flattened_weights
+        
+    except Exception as e:
+        print(f"  Error generating initial weights for seed {seed}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 def main():
     """Main function to perform PCA and plot the results."""
@@ -109,12 +132,18 @@ def main():
             annotations.append(f'seed {seed}')
     
     print("Generating initial weights for vanilla models...")
+    initial_weights_count = 0
     for seed in vanilla_seeds:
         weights = generate_initial_weights(seed, device)
         if weights is not None:
             all_weights.append(weights)
             labels.append('Initial')
             annotations.append(f'seed {seed}')
+            initial_weights_count += 1
+        else:
+            print(f"  Failed to generate initial weights for seed {seed}")
+    
+    print(f"Successfully generated {initial_weights_count} initial weight sets")
             
     print("Loading single-task models...")
     for path, task in zip(single_task_paths, single_tasks):
@@ -129,6 +158,7 @@ def main():
         return
         
     print(f"Total models loaded: {len(all_weights)}")
+    print(f"Label distribution: {dict(zip(*np.unique(labels, return_counts=True)))}")
 
     # --- Perform PCA ---
     print("Performing PCA...")
@@ -148,6 +178,7 @@ def main():
     # Plot all data points on the main axes
     for label_type in np.unique(labels):
         indices = [i for i, l in enumerate(labels) if l == label_type]
+        print(f"Plotting {len(indices)} points for {label_type}")
         ax.scatter(principal_components[indices, 0], principal_components[indices, 1], 
                    color=colors[label_type], label=label_type, s=130, alpha=0.8, marker=markers[label_type])
 
