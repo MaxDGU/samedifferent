@@ -307,7 +307,7 @@ class CircuitAnalyzer:
                     for key, value in neuron.items():
                         if isinstance(value, np.ndarray):
                             serializable_neuron[key] = value.tolist()
-                        elif isinstance(value, (np.integer, np.floating)):
+                        elif isinstance(value, (np.integer, np.floating, np.bool_)):
                             serializable_neuron[key] = value.item()
                         else:
                             serializable_neuron[key] = value
