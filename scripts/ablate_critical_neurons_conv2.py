@@ -40,19 +40,26 @@ class NeuronAblator:
         self.maml.eval()
         self.ablation_hooks = []
     
-    def _create_ablation_hook(self, neuron_idx):
+    def _create_ablation_hook(self, neuron_indices):
+        """Creates a hook to zero out a list of neurons."""
         def hook(module, input, output):
-            output[:, neuron_idx] = 0
+            # Zero out all specified neuron indices
+            output[:, neuron_indices] = 0
             return output
         return hook
     
-    def _register_ablation_hook(self, layer_name, neuron_idx):
+    def _register_ablation_hook(self, layer_name, neuron_indices):
+        """Registers an ablation hook on the specified layer for a list of neurons."""
         if layer_name == 'fc1':
             target_layer = self.model.fc_layers[0]
         else:
             raise ValueError(f"Ablation for layer '{layer_name}' not implemented.")
         
-        hook = target_layer.register_forward_hook(self._create_ablation_hook(neuron_idx))
+        # Ensure neuron_indices is a list
+        if not isinstance(neuron_indices, list):
+            neuron_indices = [neuron_indices]
+            
+        hook = target_layer.register_forward_hook(self._create_ablation_hook(neuron_indices))
         self.ablation_hooks.append(hook)
     
     def _cleanup_ablation_hooks(self):
@@ -60,10 +67,10 @@ class NeuronAblator:
             hook.remove()
         self.ablation_hooks = []
     
-    def evaluate(self, data_loader, adaptation_steps=5, ablated_layer=None, ablated_neuron=None, max_episodes=100):
-        if ablated_layer and ablated_neuron is not None:
-            print(f"INFO: Ablating {ablated_layer} neuron {ablated_neuron}")
-            self._register_ablation_hook(ablated_layer, ablated_neuron)
+    def evaluate(self, data_loader, adaptation_steps=5, ablated_layer=None, ablated_neurons=None, max_episodes=100):
+        if ablated_layer and ablated_neurons is not None:
+            print(f"INFO: Ablating {ablated_layer} neurons {ablated_neurons}")
+            self._register_ablation_hook(ablated_layer, ablated_neurons)
         
         label_results = {0: {'correct': 0, 'total': 0}, 1: {'correct': 0, 'total': 0}}
         
@@ -104,27 +111,38 @@ class NeuronAblator:
         }
     
 def create_visualizations(results, output_dir):
-    conditions = ['Baseline', 'Ablate SAME\nNeuron 590', 'Ablate DIFFERENT\nNeuron 289']
+    conditions = [
+        'Baseline', 
+        'Ablate SAME\nNeuron 590', 
+        'Ablate DIFFERENT\nNeuron 289',
+        'Ablate Top 3 SAME\nNeurons',
+        'Ablate Top 2 DIFFERENT\nNeurons'
+    ]
     same_accs = [
         results['baseline']['same_accuracy'],
         results['same_neuron_ablated']['same_accuracy'],
-        results['different_neuron_ablated']['same_accuracy']
+        results['different_neuron_ablated']['same_accuracy'],
+        results['top_3_same_ablated']['same_accuracy'],
+        results['top_2_diff_ablated']['same_accuracy']
     ]
     diff_accs = [
         results['baseline']['different_accuracy'],
         results['same_neuron_ablated']['different_accuracy'],
-        results['different_neuron_ablated']['different_accuracy']
+        results['different_neuron_ablated']['different_accuracy'],
+        results['top_3_same_ablated']['different_accuracy'],
+        results['top_2_diff_ablated']['different_accuracy']
     ]
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 7))
     x = np.arange(len(conditions))
 
+    colors = ['#1f77b4', '#d62728', '#ff7f0e', '#9467bd', '#2ca02c']
     for ax, accs, title in [(ax1, same_accs, 'Impact on SAME Accuracy'), (ax2, diff_accs, 'Impact on DIFFERENT Accuracy')]:
-        bars = ax.bar(x, accs, color=['#1f77b4', '#d62728', '#ff7f0e'], alpha=0.8)
-        ax.set_title(title, fontsize=14, fontweight='bold')
+        bars = ax.bar(x, accs, color=colors, alpha=0.8)
+        ax.set_title(title, fontsize=16, fontweight='bold')
         ax.set_ylabel('Accuracy (%)', fontsize=12)
         ax.set_xticks(x)
-        ax.set_xticklabels(conditions, fontsize=10)
+        ax.set_xticklabels(conditions, fontsize=10, rotation=45, ha="right")
         ax.set_ylim(0, 100)
         for bar, acc in zip(bars, accs):
             ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1, f'{acc:.1f}%', ha='center', va='bottom')
@@ -157,10 +175,16 @@ def main():
     results['baseline'] = ablator.evaluate(dataloader, args.adaptation_steps, max_episodes=args.max_episodes)
     
     print("\n--- Running Ablation on SAME-preferring Neuron 590 (fc1) ---")
-    results['same_neuron_ablated'] = ablator.evaluate(dataloader, args.adaptation_steps, ablated_layer='fc1', ablated_neuron=590, max_episodes=args.max_episodes)
+    results['same_neuron_ablated'] = ablator.evaluate(dataloader, args.adaptation_steps, ablated_layer='fc1', ablated_neurons=590, max_episodes=args.max_episodes)
     
     print("\n--- Running Ablation on DIFFERENT-preferring Neuron 289 (fc1) ---")
-    results['different_neuron_ablated'] = ablator.evaluate(dataloader, args.adaptation_steps, ablated_layer='fc1', ablated_neuron=289, max_episodes=args.max_episodes)
+    results['different_neuron_ablated'] = ablator.evaluate(dataloader, args.adaptation_steps, ablated_layer='fc1', ablated_neurons=289, max_episodes=args.max_episodes)
+    
+    print("\n--- Running Group Ablation on Top 3 SAME-preferring Neurons (fc1) ---")
+    results['top_3_same_ablated'] = ablator.evaluate(dataloader, args.adaptation_steps, ablated_layer='fc1', ablated_neurons=[590, 691, 690], max_episodes=args.max_episodes)
+    
+    print("\n--- Running Group Ablation on Top 2 DIFFERENT-preferring Neurons (fc1) ---")
+    results['top_2_diff_ablated'] = ablator.evaluate(dataloader, args.adaptation_steps, ablated_layer='fc1', ablated_neurons=[289, 21], max_episodes=args.max_episodes)
     
     # --- Report and Save ---
     print("\n" + "="*60 + "\nABLATION EXPERIMENT SUMMARY\n" + "="*60)
