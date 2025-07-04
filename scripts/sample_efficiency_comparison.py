@@ -52,6 +52,12 @@ ALL_PB_TASKS = [
 VARIABLE_SUPPORT_SIZES = [4, 6, 8, 10]
 FIXED_QUERY_SIZE = 2
 
+def identity_collate(batch):
+    """A simple collate_fn that returns the list of items unchanged.
+    This keeps each episode dictionary intact so we can handle variable
+    support/query sizes without padding."""
+    return batch
+
 class VanillaPBDataset(torch.utils.data.Dataset):
     """
     Memory-efficient dataset that loads H5 data on-demand for vanilla SGD.
@@ -132,46 +138,86 @@ def accuracy(predictions, targets):
         return (predicted_labels == targets).float().mean()
 
 def fast_adapt(batch, learner, loss_fn, adaptation_steps, device):
-    """Perform fast adaptation for meta-learning."""
-    data, labels = batch
-    data, labels = data.to(device), labels.to(device)
-    
-    # Separate support and query
-    support_size = data.size(0) // 2  # Assuming equal support and query sizes
-    support_data, query_data = data[:support_size], data[support_size:]
-    support_labels, query_labels = labels[:support_size], labels[support_size:]
-    
-    # Adapt on support set
-    for step in range(adaptation_steps):
+    """Perform fast adaptation for a single episode.
+
+    The function now supports two input formats:
+    1. A tuple ``(data, labels)`` where ``data`` is concatenated support+query images.
+       In this legacy format we assume the support set is the first half of the
+       samples.
+    2. A dictionary produced by ``SameDifferentDataset`` where the episode is
+       separated into support/query splits.  This is the preferred format used
+       when we pass ``identity_collate`` to the ``DataLoader``.
+    """
+    # ------------------------------------------------------------------
+    # Handle legacy tuple format first (kept for backwards-compatibility)
+    # ------------------------------------------------------------------
+    if isinstance(batch, (list, tuple)) and len(batch) == 2 and torch.is_tensor(batch[0]):
+        data, labels = batch
+        data, labels = data.to(device), labels.to(device)
+
+        # Assume equal support/query split (legacy behaviour)
+        support_size = data.size(0) // 2
+        support_data, query_data = data[:support_size], data[support_size:]
+        support_labels, query_labels = labels[:support_size], labels[support_size:]
+
+    else:
+        # ------------------------------------------------------------------
+        # New dictionary episode format
+        # ------------------------------------------------------------------
+        if not isinstance(batch, dict):
+            raise TypeError(
+                "fast_adapt expected episode dict or (data, labels) tuple, got type {}".format(type(batch))
+            )
+
+        support_data = batch['support_images'].to(device)   # shape: [Ns, C, H, W]
+        support_labels = batch['support_labels'].to(device) # shape: [Ns]
+        query_data   = batch['query_images'].to(device)     # shape: [Nq, C, H, W]
+        query_labels = batch['query_labels'].to(device)     # shape: [Nq]
+
+    # --------------------------- Adaptation ---------------------------
+    for _ in range(adaptation_steps):
         support_preds = learner(support_data)
-        support_loss = loss_fn(support_preds, support_labels)
+        support_loss  = loss_fn(support_preds, support_labels)
         learner.adapt(support_loss)
-    
-    # Evaluate on query set
+
+    # ---------------------------- Evaluation --------------------------
     query_preds = learner(query_data)
-    query_loss = loss_fn(query_preds, query_labels)
-    query_acc = accuracy(query_preds, query_labels)
-    
+    query_loss  = loss_fn(query_preds, query_labels)
+    query_acc   = accuracy(query_preds, query_labels)
+
     return query_loss, query_acc
 
 def validate_meta_model(maml, val_loader, device, adaptation_steps, loss_fn):
-    """Validate meta-learning model."""
+    """Validate meta-learning model.
+
+    We iterate over each episode in the meta-batch to compute the loss/accuracy
+    per task and then average across the tasks in the batch.
+    """
     maml.eval()
     total_loss = 0.0
     total_acc = 0.0
     num_batches = 0
-    
+
     with torch.no_grad():
-        for batch in val_loader:
-            learner = maml.clone()
-            val_loss, val_acc = fast_adapt(batch, learner, loss_fn, adaptation_steps, device)
-            total_loss += val_loss.item()
-            total_acc += val_acc.item()
+        for batch in val_loader:  # batch is a list of episode dicts (size = meta_batch_size)
+            batch_loss = 0.0
+            batch_acc = 0.0
+
+            for episode in batch:
+                learner = maml.clone()
+                ep_loss, ep_acc = fast_adapt(episode, learner, loss_fn, adaptation_steps, device)
+                batch_loss += ep_loss.item()
+                batch_acc  += ep_acc.item()
+
+            # Average across tasks in the meta-batch
+            batch_size = len(batch)
+            total_loss += batch_loss / batch_size
+            total_acc  += batch_acc  / batch_size
             num_batches += 1
-    
+
     avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
-    avg_acc = total_acc / num_batches if num_batches > 0 else 0.0
-    
+    avg_acc  = total_acc  / num_batches if num_batches > 0 else 0.0
+
     return avg_loss, avg_acc
 
 def validate_vanilla_model(model, val_loader, device, loss_fn):
@@ -228,9 +274,9 @@ def train_fomaml(args, device, save_dir):
     )
     
     train_loader = DataLoader(train_dataset, batch_size=args.meta_batch_size, 
-                             shuffle=True, collate_fn=collate_episodes)
+                             shuffle=True, collate_fn=identity_collate)
     val_loader = DataLoader(val_dataset, batch_size=args.meta_batch_size, 
-                           shuffle=False, collate_fn=collate_episodes)
+                           shuffle=False, collate_fn=identity_collate)
     
     # Optimizer and loss
     optimizer = optim.Adam(maml.parameters(), lr=args.outer_lr)
@@ -261,8 +307,11 @@ def train_fomaml(args, device, save_dir):
                 batch_acc += task_acc
                 
                 # Count data points (support + query for each task)
-                data, _ = task_batch
-                total_data_points += data.size(0)
+                if isinstance(task_batch, dict):
+                    total_data_points += task_batch['support_images'].size(0) + task_batch['query_images'].size(0)
+                else:
+                    data, _ = task_batch
+                    total_data_points += data.size(0)
             
             # Average over tasks in batch
             batch_loss /= len(batch)
@@ -330,9 +379,9 @@ def train_second_order_maml(args, device, save_dir):
     )
     
     train_loader = DataLoader(train_dataset, batch_size=args.meta_batch_size, 
-                             shuffle=True, collate_fn=collate_episodes)
+                             shuffle=True, collate_fn=identity_collate)
     val_loader = DataLoader(val_dataset, batch_size=args.meta_batch_size, 
-                           shuffle=False, collate_fn=collate_episodes)
+                           shuffle=False, collate_fn=identity_collate)
     
     # Optimizer and loss
     optimizer = optim.Adam(maml.parameters(), lr=args.outer_lr)
@@ -362,9 +411,12 @@ def train_second_order_maml(args, device, save_dir):
                 batch_loss += task_loss
                 batch_acc += task_acc
                 
-                # Count data points
-                data, _ = task_batch
-                total_data_points += data.size(0)
+                # Count data points (support + query for each task)
+                if isinstance(task_batch, dict):
+                    total_data_points += task_batch['support_images'].size(0) + task_batch['query_images'].size(0)
+                else:
+                    data, _ = task_batch
+                    total_data_points += data.size(0)
             
             # Average over tasks in batch
             batch_loss /= len(batch)
