@@ -11,16 +11,17 @@
 #SBATCH --partition=gpu
 
 # Load required modules
-module purge
-module load anaconda3/2023.9
-module load cudatoolkit/11.7
-module load cudnn/cuda-11.x/8.5.0
+module load anaconda3/2022.5
+module load cudatoolkit/12.6
 
 # Activate conda environment (adjust path as needed)
-source activate /home/mg7411/.conda/envs/metasamedifferent
 
+#source activate /home/mg7411/.conda/envs/metasamedifferent
+source /usr/licensed/anaconda3/2022.5/etc/profile.d/conda.sh
+
+conda activate tensorflow
 # Set working directory
-cd /scratch/gpfs/mg7411/samedifferent/metasamedifferent
+#cd /scratch/gpfs/mg7411/samedifferent/metasamedifferent
 
 # Create logs directory
 mkdir -p logs
