@@ -24,8 +24,20 @@ def calculate_accuracy(model, data_loader, device, analyzer=None, layer_to_ablat
 
     with torch.no_grad():
         for batch in data_loader:
-            images = batch['image'].to(device)
-            labels = batch['label'].to(device)
+            # Handle both flattened-image batches and episode-based batches
+            if 'image' in batch and 'label' in batch:
+                images = batch['image'].to(device)
+                labels = batch['label'].to(device)
+            elif 'query_images' in batch and 'query_labels' in batch:
+                # Episode batch: flatten query set across episodes
+                q_imgs = batch['query_images']  # [B, M, C, H, W]
+                q_lbls = batch['query_labels']  # [B, M]
+
+                B, M, C, H, W = q_imgs.shape
+                images = q_imgs.view(B * M, C, H, W).to(device)
+                labels = q_lbls.view(-1).to(device)
+            else:
+                raise KeyError("Batch must contain either ('image','label') or ('query_images','query_labels') keys.")
             
             if analyzer:
                 outputs, _ = analyzer.get_activations(images)
