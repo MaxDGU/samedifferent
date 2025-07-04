@@ -265,7 +265,7 @@ def main():
     # Vanilla SGD parameters
     parser.add_argument('--vanilla_batch_size', type=int, default=32, 
                        help='Vanilla SGD batch size')
-    parser.add_argument('--vanilla_lr', type=float, default=1e-4, 
+    parser.add_argument('--vanilla_lr', type=float, default=1e-3, 
                        help='Vanilla SGD learning rate')
     
     # Validation and saving

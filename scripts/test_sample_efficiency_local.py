@@ -32,7 +32,7 @@ def main():
         "--epochs", "2",
         "--meta_batch_size", "2",
         "--vanilla_batch_size", "8",
-        "--val_frequency", "500",  # Validate every 500 batches instead of every 2
+        "--val_frequency", "100",  # Validate every 100 batches for local testing
         "--save_dir", "results/sample_efficiency_test",
         "--methods", "vanilla"  # Test with vanilla SGD first since it was stalling
     ]
