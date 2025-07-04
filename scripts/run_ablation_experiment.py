@@ -10,9 +10,9 @@ from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from meta_baseline.models import Conv6CNN as SameDifferentCNN
-from baselines.models.utils import SameDifferentDataset, PB_TASKS
+from baselines.models.utils import PB_TASKS
 from circuit_analysis.analyzer import CircuitAnalyzer
-from meta_baseline.models.utils_meta import collate_episodes  # custom collate for variable-length episodes
+from meta_baseline.models.utils_meta import SameDifferentDataset, collate_episodes  # dataset and collate compatible with each other
 
 def calculate_accuracy(model, data_loader, device, analyzer=None, layer_to_ablate=None, channel_to_ablate=None):
     """Calculates the model's accuracy on a given dataset."""
