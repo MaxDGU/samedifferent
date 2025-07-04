@@ -61,8 +61,19 @@ class SelectivityAnalyzer:
                 if batch_count >= max_batches:
                     break
                 
-                images = batch['image'].to(self.device)
-                labels = batch['label'].to(self.device)
+                # Handle episodic format (from meta-learning datasets)
+                if 'query_images' in batch:
+                    images = batch['query_images'].to(self.device).squeeze(0)
+                    labels = batch['query_labels'].to(self.device).squeeze(0)
+                    
+                    # Reshape query data: [batch_size, query_size, channels, height, width] -> [batch_size * query_size, channels, height, width]
+                    batch_size, query_size = images.shape[:2]
+                    images = images.view(batch_size * query_size, *images.shape[2:])
+                    labels = labels.view(batch_size * query_size)
+                else:
+                    # Handle regular format
+                    images = batch['image'].to(self.device)
+                    labels = batch['label'].to(self.device)
                 
                 # Forward pass to get activations
                 _ = self.model(images)
@@ -187,6 +198,16 @@ def train_quick_model(device, data_dir, output_dir, epochs=20):
             query_images = batch['query_images'].to(device).squeeze(0)
             query_labels = batch['query_labels'].to(device).squeeze(0)
             
+            # Reshape support data: [batch_size, support_size, channels, height, width] -> [batch_size * support_size, channels, height, width]
+            batch_size, support_size = support_images.shape[:2]
+            support_images = support_images.view(batch_size * support_size, *support_images.shape[2:])
+            support_labels = support_labels.view(batch_size * support_size)
+            
+            # Reshape query data similarly
+            batch_size, query_size = query_images.shape[:2]
+            query_images = query_images.view(batch_size * query_size, *query_images.shape[2:])
+            query_labels = query_labels.view(batch_size * query_size)
+            
             # Adaptation steps
             for _ in range(3):  # 3 adaptation steps
                 preds = learner(support_images)
@@ -237,8 +258,19 @@ def calculate_accuracy(model, data_loader, device, analyzer=None, ablation_spec=
     
     with torch.no_grad():
         for batch in data_loader:
-            images = batch['image'].to(device)
-            labels = batch['label'].to(device)
+            # Handle episodic format (from meta-learning datasets)
+            if 'query_images' in batch:
+                images = batch['query_images'].to(device).squeeze(0)
+                labels = batch['query_labels'].to(device).squeeze(0)
+                
+                # Reshape query data: [batch_size, query_size, channels, height, width] -> [batch_size * query_size, channels, height, width]
+                batch_size, query_size = images.shape[:2]
+                images = images.view(batch_size * query_size, *images.shape[2:])
+                labels = labels.view(batch_size * query_size)
+            else:
+                # Handle regular format
+                images = batch['image'].to(device)
+                labels = batch['label'].to(device)
             
             if analyzer:
                 outputs, _ = analyzer.get_activations(images)
@@ -284,7 +316,7 @@ def main():
     # Create test dataset - use regular task for testing
     test_tasks = ['regular']
     test_dataset = SameDifferentDataset(data_dir, test_tasks, 'test', support_sizes=[4])
-    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=2)
+    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=2, collate_fn=collate_episodes)
     print(f"Loaded test dataset with {len(test_dataset)} examples")
     
     # Step 1: Analyze selectivity to find DIFFERENT-selective neurons
