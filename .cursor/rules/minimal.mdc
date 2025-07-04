@@ -1,0 +1,4 @@
+---
+alwaysApply: true
+---
+if I ask for anything, first check if relevant existing files exist that can help us achieve the requested task, only if there do not exist relevant reusable code should you create new code or a new file, and when you do create new code, try to make it minimal and reusable. Always strive for code and file minimalism and keep changes targeted to the specific request being made. If other changes outside of what is requested are necessary, note them explicitly.  

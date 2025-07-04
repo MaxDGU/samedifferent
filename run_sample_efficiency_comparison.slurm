@@ -43,7 +43,6 @@ python scripts/sample_efficiency_comparison.py \
 
 # After completion, generate plots
 python scripts/plot_sample_efficiency_results.py \
-    --results_dir results/sample_efficiency_comparison/seed_42 \
-    --individual_plots
+    --results_dir results/sample_efficiency_comparison/seed_42
 
 echo "Sample efficiency comparison completed!" 

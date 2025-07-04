@@ -198,22 +198,27 @@ def validate_meta_model(maml, val_loader, device, adaptation_steps, loss_fn):
     total_acc = 0.0
     num_batches = 0
 
-    with torch.no_grad():
-        for batch in val_loader:  # batch is a list of episode dicts (size = meta_batch_size)
-            batch_loss = 0.0
-            batch_acc = 0.0
+    for batch in val_loader:  # batch is a list of episode dicts (size = meta_batch_size)
+        batch_loss = 0.0
+        batch_acc = 0.0
 
-            for episode in batch:
-                learner = maml.clone()
-                ep_loss, ep_acc = fast_adapt(episode, learner, loss_fn, adaptation_steps, device)
-                batch_loss += ep_loss.item()
-                batch_acc  += ep_acc.item()
+        for episode in batch:
+            learner = maml.clone()
+            # Ensure learner is in train mode for gradient computation during adaptation
+            learner.train()
+            # Ensure all learner parameters require gradients
+            for param in learner.parameters():
+                param.requires_grad = True
+            # Allow gradients for adaptation but detach from outer computation graph
+            ep_loss, ep_acc = fast_adapt(episode, learner, loss_fn, adaptation_steps, device)
+            batch_loss += ep_loss.detach().item()
+            batch_acc  += ep_acc.item()
 
-            # Average across tasks in the meta-batch
-            batch_size = len(batch)
-            total_loss += batch_loss / batch_size
-            total_acc  += batch_acc  / batch_size
-            num_batches += 1
+        # Average across tasks in the meta-batch
+        batch_size = len(batch)
+        total_loss += batch_loss / batch_size
+        total_acc  += batch_acc  / batch_size
+        num_batches += 1
 
     avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
     avg_acc  = total_acc  / num_batches if num_batches > 0 else 0.0

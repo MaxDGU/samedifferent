@@ -161,7 +161,7 @@ def main():
         test_loss, test_acc = validate_epoch(model, test_loader, criterion, device)
         test_results[task] = {'test_loss': test_loss, 'test_acc': test_acc}
         print(f'Test Loss for {task}: {test_loss:.4f} | Test Acc for {task}: {test_acc:.2f}%')
-
+    
     # Save metrics
     metrics = {
         'args': vars(args),
