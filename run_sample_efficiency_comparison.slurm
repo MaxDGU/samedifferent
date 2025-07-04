@@ -29,13 +29,13 @@ mkdir -p logs
 python scripts/sample_efficiency_comparison.py \
     --epochs 50 \
     --seed 42 \
-    --meta_batch_size 16 \
-    --vanilla_batch_size 64 \
+    --meta_batch_size 8 \
+    --vanilla_batch_size 32 \
     --inner_lr 0.001 \
     --outer_lr 0.0001 \
     --vanilla_lr 0.0001 \
     --adaptation_steps 5 \
-    --val_frequency 25 \
+    --val_frequency 500 \
     --save_dir results/sample_efficiency_comparison \
     --methods fomaml second_order vanilla \
     --data_dir /scratch/gpfs/mg7411/samedifferent/data/meta_h5/pb

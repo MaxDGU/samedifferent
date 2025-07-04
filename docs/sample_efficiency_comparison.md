@@ -98,21 +98,35 @@ python scripts/sample_efficiency_comparison.py \
     --data_dir data/meta_h5/pb
 ```
 
+## Implementation Details
+
+### VanillaPBDataset Class (Lazy Loading)
+The `VanillaPBDataset` class uses lazy loading to efficiently handle large datasets. Instead of loading all data into memory at once, it stores file paths and indices, then loads individual samples on-demand during training.
+
+Key features:
+- **Lazy Loading**: Stores metadata (file paths, episode indices) instead of actual data
+- **Memory Efficient**: Only loads individual samples when requested in `__getitem__`
+- **Indexed Access**: Pre-computes indices for all support and query samples across all H5 files
+- **On-Demand Loading**: Opens H5 files and loads specific samples only when needed
+- **Format Conversion**: Converts from HWC to CHW format and normalizes to [0,1]
+
+This approach prevents memory overflow when dealing with 360,000+ individual samples across all tasks and support sizes.
+
 ## Key Parameters
 
 ### Meta-Learning Parameters
-- `--meta_batch_size`: Episodes per meta-batch (default: 16)
+- `--meta_batch_size`: Episodes per meta-batch (default: 8, reduced for efficiency)
 - `--inner_lr`: Inner loop learning rate (default: 0.001)
 - `--outer_lr`: Outer loop learning rate (default: 0.0001)
 - `--adaptation_steps`: Steps per adaptation (default: 5)
 
 ### Vanilla SGD Parameters
-- `--vanilla_batch_size`: Batch size for vanilla SGD (default: 64)
+- `--vanilla_batch_size`: Batch size for vanilla SGD (default: 32, reduced for efficiency)
 - `--vanilla_lr`: Learning rate for vanilla SGD (default: 0.0001)
 
 ### General Parameters
 - `--epochs`: Number of training epochs (default: 50)
-- `--val_frequency`: Validation frequency in batches (default: 25)
+- `--val_frequency`: Validation frequency in batches (default: 50, reduced for efficiency)
 - `--seed`: Random seed for reproducibility (default: 42)
 
 ## Expected Outputs
@@ -146,11 +160,16 @@ python scripts/sample_efficiency_comparison.py \
 
 3. **CUDA Out of Memory**:
    - Reduce batch sizes: `--meta_batch_size 8 --vanilla_batch_size 32`
-   - Increase validation frequency: `--val_frequency 50`
+   - Increase validation frequency: `--val_frequency 500`
 
 4. **Model Import Issues**:
    - Ensure project root is in Python path
    - Check imports with verification script
+
+5. **Validation Accuracy Stuck at 50%**:
+   - Fixed with lazy loading implementation and proper validation frequency
+   - Learning rate of 1e-4 is optimal for vanilla SGD
+   - Validation every 500 batches prevents excessive validation overhead
 
 ### Performance Tips
 
