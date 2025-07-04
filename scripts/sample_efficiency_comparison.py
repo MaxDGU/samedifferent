@@ -206,13 +206,10 @@ def validate_meta_model(maml, val_loader, device, adaptation_steps, loss_fn):
             learner = maml.clone()
             # Ensure learner is in train mode for gradient computation during adaptation
             learner.train()
-            # Ensure all learner parameters require gradients
-            for param in learner.parameters():
-                param.requires_grad = True
             # Allow gradients for adaptation but detach from outer computation graph
             ep_loss, ep_acc = fast_adapt(episode, learner, loss_fn, adaptation_steps, device)
             batch_loss += ep_loss.detach().item()
-            batch_acc  += ep_acc.item()
+            batch_acc += ep_acc.item()
 
         # Average across tasks in the meta-batch
         batch_size = len(batch)
