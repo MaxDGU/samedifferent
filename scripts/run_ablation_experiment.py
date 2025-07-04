@@ -9,7 +9,7 @@ from tqdm import tqdm
 # Add the root directory to the path to allow imports from other directories
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from baselines.models.conv4 import SameDifferentCNN
+from meta_baseline.models import Conv6CNN as SameDifferentCNN
 from baselines.models.utils import SameDifferentDataset, PB_TASKS
 from circuit_analysis.analyzer import CircuitAnalyzer
 
@@ -49,7 +49,8 @@ def main():
     print(f"Using device: {device}")
 
     # --- 2. Load Model ---
-    model_path = './results/naturalistic/vanilla/conv4/seed_42/best_model.pt'
+    # Pretrained PB meta-baseline conv6 model trained on full PB range
+    model_path = '/scratch/gpfs/mg7411/samedifferent/results/meta_baselines/conv6/seed_45/best_model.pt'
     model = SameDifferentCNN()
     
     # When loading a model saved with nn.DataParallel, the state dict keys are prefixed with 'module.'
@@ -82,7 +83,7 @@ def main():
     analyzer = CircuitAnalyzer(model)
 
     # --- 5. Run Ablation Experiment ---
-    layer_to_ablate = 'conv4'
+    layer_to_ablate = 'conv6'
     layer = analyzer._layer_map[layer_to_ablate]
     num_channels = layer.out_channels
     
