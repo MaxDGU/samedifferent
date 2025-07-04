@@ -12,6 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from meta_baseline.models import Conv6CNN as SameDifferentCNN
 from baselines.models.utils import SameDifferentDataset, PB_TASKS
 from circuit_analysis.analyzer import CircuitAnalyzer
+from meta_baseline.models.utils_meta import collate_episodes  # custom collate for variable-length episodes
 
 def calculate_accuracy(model, data_loader, device, analyzer=None, layer_to_ablate=None, channel_to_ablate=None):
     """Calculates the model's accuracy on a given dataset."""
@@ -88,7 +89,8 @@ def main():
     # Use the full PB dataset: all 10 tasks and all standard support sizes
     tasks = PB_TASKS  # ['regular', 'lines', 'open', 'wider_line', 'scrambled', 'random_color', 'arrows', 'irregular', 'filled', 'original']
     test_dataset = SameDifferentDataset(data_dir, tasks, 'test', support_sizes=[4, 6, 8, 10])
-    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+    # Use custom collate function to handle variable-length episodes across tasks/support sizes
+    test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False, collate_fn=collate_episodes)
     print(f"Loaded full PB test dataset with {len(tasks)} tasks and support sizes [4,6,8,10].")
 
     # --- 4. Initialize Analyzer ---
