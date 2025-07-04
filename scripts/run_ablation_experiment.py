@@ -3,8 +3,12 @@ import torch.nn as nn
 import numpy as np
 import os
 import sys
+import json
+import random
+from collections import defaultdict
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from scipy.stats import ttest_ind
 
 # Add the root directory to the path to allow imports from other directories
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -13,15 +17,146 @@ from baselines.models.conv4 import SameDifferentCNN
 from baselines.models.utils import SameDifferentDataset
 from circuit_analysis.analyzer import CircuitAnalyzer
 
-def calculate_accuracy(model, data_loader, device, analyzer=None, layer_to_ablate=None, channel_to_ablate=None):
-    """Calculates the model's accuracy on a given dataset."""
+class SelectivityAnalyzer:
+    """Class to analyze neuron selectivity for SAME vs DIFFERENT responses"""
+    
+    def __init__(self, model, device):
+        self.model = model
+        self.device = device
+        self.activation_store = {}
+        self._register_hooks()
+    
+    def _register_hooks(self):
+        """Register hooks to capture activations"""
+        def get_activation(name):
+            def hook(model, input, output):
+                # Store mean-pooled activations to reduce dimensionality
+                if len(output.shape) == 4:  # Conv layers (B, C, H, W)
+                    self.activation_store[name] = output.mean(dim=(2, 3)).detach()
+                else:  # FC layers (B, C)
+                    self.activation_store[name] = output.detach()
+            return hook
+        
+        # Register hooks for all layers
+        for name, layer in self.model.named_modules():
+            if isinstance(layer, (nn.Conv2d, nn.Linear)) and not list(layer.children()):
+                layer.register_forward_hook(get_activation(name))
+    
+    def analyze_selectivity(self, data_loader, max_batches=50):
+        """
+        Analyze neuron selectivity for SAME vs DIFFERENT responses
+        Returns neurons sorted by selectivity (negative = DIFFERENT-preferring)
+        """
+        print("Analyzing neuron selectivity...")
+        
+        # Collect activations by label
+        activations_by_label = defaultdict(lambda: defaultdict(list))
+        batch_count = 0
+        
+        self.model.eval()
+        with torch.no_grad():
+            for batch in tqdm(data_loader, desc="Collecting activations", total=min(len(data_loader), max_batches)):
+                if batch_count >= max_batches:
+                    break
+                
+                images = batch['image'].to(self.device)
+                labels = batch['label'].to(self.device)
+                
+                # Forward pass to get activations
+                _ = self.model(images)
+                
+                # Store activations by label
+                labels_np = labels.cpu().numpy()
+                for i, label in enumerate(labels_np):
+                    for layer_name in self.activation_store:
+                        activation = self.activation_store[layer_name][i].cpu().numpy()
+                        activations_by_label[layer_name][label].append(activation)
+                
+                batch_count += 1
+        
+        # Analyze selectivity for each layer
+        selectivity_results = {}
+        
+        for layer_name, label_data in activations_by_label.items():
+            if len(label_data) < 2:  # Need both labels
+                continue
+            
+            same_activations = np.array(label_data.get(1, []))  # Label 1 = SAME
+            diff_activations = np.array(label_data.get(0, []))  # Label 0 = DIFFERENT
+            
+            if len(same_activations) == 0 or len(diff_activations) == 0:
+                continue
+            
+            # Calculate selectivity for each neuron
+            num_neurons = same_activations.shape[1] if len(same_activations.shape) > 1 else 1
+            neuron_selectivities = []
+            
+            for neuron_idx in range(num_neurons):
+                if len(same_activations.shape) > 1:
+                    same_vals = same_activations[:, neuron_idx]
+                    diff_vals = diff_activations[:, neuron_idx]
+                else:
+                    same_vals = same_activations
+                    diff_vals = diff_activations
+                
+                # Calculate selectivity index: (mean_same - mean_diff) / (mean_same + mean_diff)
+                mean_same = np.mean(same_vals)
+                mean_diff = np.mean(diff_vals)
+                
+                if (mean_same + mean_diff) > 0:
+                    selectivity = (mean_same - mean_diff) / (mean_same + mean_diff)
+                else:
+                    selectivity = 0
+                
+                # Statistical significance test
+                try:
+                    t_stat, p_value = ttest_ind(same_vals, diff_vals)
+                except:
+                    t_stat, p_value = 0, 1
+                
+                neuron_selectivities.append({
+                    'layer_name': layer_name,
+                    'neuron_idx': neuron_idx,
+                    'selectivity': selectivity,
+                    'mean_same': mean_same,
+                    'mean_diff': mean_diff,
+                    't_stat': t_stat,
+                    'p_value': p_value,
+                    'significant': p_value < 0.01
+                })
+            
+            selectivity_results[layer_name] = neuron_selectivities
+        
+        return selectivity_results
+    
+    def find_top_different_neurons(self, selectivity_results, top_k=3):
+        """Find the top K neurons most selective for DIFFERENT responses"""
+        all_neurons = []
+        
+        for layer_name, neurons in selectivity_results.items():
+            # Filter for significant neurons with negative selectivity (DIFFERENT-preferring)
+            diff_neurons = [n for n in neurons if n['significant'] and n['selectivity'] < 0]
+            all_neurons.extend(diff_neurons)
+        
+        # Sort by selectivity (most negative = most DIFFERENT-selective)
+        all_neurons.sort(key=lambda x: x['selectivity'])
+        
+        return all_neurons[:top_k]
+
+def calculate_accuracy(model, data_loader, device, analyzer=None, ablation_spec=None):
+    """Calculate model accuracy with optional ablation"""
     model.eval()
     correct = 0
     total = 0
     
-    if analyzer and layer_to_ablate and channel_to_ablate is not None:
-        analyzer.ablate_layer(layer_to_ablate, channel_to_ablate)
-
+    # Apply ablation if specified
+    if analyzer and ablation_spec:
+        if ablation_spec['type'] == 'single':
+            analyzer.ablate_layer(ablation_spec['layer'], ablation_spec['neuron'])
+        elif ablation_spec['type'] == 'multiple':
+            for layer, neuron in ablation_spec['neurons']:
+                analyzer.ablate_layer(layer, neuron)
+    
     with torch.no_grad():
         for batch in data_loader:
             images = batch['image'].to(device)
@@ -31,82 +166,206 @@ def calculate_accuracy(model, data_loader, device, analyzer=None, layer_to_ablat
                 outputs, _ = analyzer.get_activations(images)
             else:
                 outputs = model(images)
-
-            _, predicted = torch.max(outputs.data, 1)
             
+            _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-            
+    
     if analyzer:
         analyzer.remove_hooks()
-        
+    
     return correct / total
 
 def main():
-    """Main function to run the ablation experiment."""
-    # --- 1. Setup ---
+    """Main function to run the enhanced ablation experiment"""
+    # Setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-
-    # --- 2. Load Model ---
+    
+    # Load model
     model_path = './results/naturalistic/vanilla/conv4/seed_42/best_model.pt'
     model = SameDifferentCNN()
     
-    # When loading a model saved with nn.DataParallel, the state dict keys are prefixed with 'module.'
-    # We need to handle this to load the model correctly.
+    # Load model state dict
     checkpoint = torch.load(model_path, map_location=device)
     state_dict = checkpoint['model_state_dict']
-
+    
     if next(iter(state_dict)).startswith('module.'):
         from collections import OrderedDict
         new_state_dict = OrderedDict()
         for k, v in state_dict.items():
-            name = k[7:] # remove `module.`
+            name = k[7:]  # remove `module.`
             new_state_dict[name] = v
         model.load_state_dict(new_state_dict, strict=False)
     else:
         model.load_state_dict(state_dict, strict=False)
-        
+    
     model.to(device)
-    print(f"Loaded trained model from {model_path}")
-
-    # --- 3. Load Data ---
+    print(f"Loaded model from {model_path}")
+    
+    # Load data
     data_dir = 'data/meta_h5/pb'
     task = 'regular'
-    # Use a smaller support size for faster testing if needed
-    test_dataset = SameDifferentDataset(data_dir, [task], 'test', support_sizes=[4]) 
+    test_dataset = SameDifferentDataset(data_dir, [task], 'test', support_sizes=[4])
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
     print(f"Loaded '{task}' test dataset.")
-
-    # --- 4. Initialize Analyzer ---
-    analyzer = CircuitAnalyzer(model)
-
-    # --- 5. Run Ablation Experiment ---
-    layer_to_ablate = 'conv4'
-    layer = analyzer._layer_map[layer_to_ablate]
-    num_channels = layer.out_channels
     
-    print(f"\n--- Starting Ablation Experiment on '{layer_to_ablate}' ---")
+    # Step 1: Analyze selectivity to find DIFFERENT-selective neurons
+    print("\n=== STEP 1: SELECTIVITY ANALYSIS ===")
+    selectivity_analyzer = SelectivityAnalyzer(model, device)
+    selectivity_results = selectivity_analyzer.analyze_selectivity(test_loader, max_batches=20)
     
-    # First, get baseline accuracy without any ablation
+    # Find top DIFFERENT-selective neurons
+    top_different_neurons = selectivity_analyzer.find_top_different_neurons(selectivity_results, top_k=3)
+    
+    print(f"\nTop 3 DIFFERENT-selective neurons:")
+    for i, neuron in enumerate(top_different_neurons):
+        print(f"  {i+1}. {neuron['layer_name']} neuron {neuron['neuron_idx']}: "
+              f"selectivity={neuron['selectivity']:.4f}, p={neuron['p_value']:.4f}")
+    
+    # Step 2: Baseline accuracy
+    print("\n=== STEP 2: BASELINE ACCURACY ===")
     baseline_accuracy = calculate_accuracy(model, test_loader, device)
-    print(f"Baseline accuracy on '{task}': {baseline_accuracy:.4f}")
-
-    # Now, ablate each channel and measure the accuracy drop
-    accuracy_drops = {}
-    for channel_idx in tqdm(range(num_channels), desc=f"Ablating channels in {layer_to_ablate}"):
-        ablated_accuracy = calculate_accuracy(model, test_loader, device, analyzer, layer_to_ablate, channel_idx)
-        accuracy_drops[channel_idx] = baseline_accuracy - ablated_accuracy
+    print(f"Baseline accuracy: {baseline_accuracy:.4f}")
+    
+    # Step 3: Targeted ablation of DIFFERENT-selective neurons
+    print("\n=== STEP 3: TARGETED ABLATION ===")
+    analyzer = CircuitAnalyzer(model)
+    
+    # Test individual ablations
+    individual_results = {}
+    for i, neuron in enumerate(top_different_neurons):
+        ablation_spec = {
+            'type': 'single',
+            'layer': neuron['layer_name'],
+            'neuron': neuron['neuron_idx']
+        }
         
-    # --- 6. Report Results ---
-    print("\n--- Ablation Results ---")
-    # Sort channels by the magnitude of accuracy drop
-    sorted_channels = sorted(accuracy_drops.items(), key=lambda item: item[1], reverse=True)
-
-    print(f"Top 5 most critical channels in '{layer_to_ablate}' for task '{task}':")
-    for i in range(min(5, len(sorted_channels))):
-        channel_idx, drop = sorted_channels[i]
-        print(f"  - Channel {channel_idx}: Accuracy drop of {drop:.4f}")
+        ablated_accuracy = calculate_accuracy(model, test_loader, device, analyzer, ablation_spec)
+        accuracy_drop = baseline_accuracy - ablated_accuracy
+        individual_results[i] = {
+            'neuron': neuron,
+            'ablated_accuracy': ablated_accuracy,
+            'accuracy_drop': accuracy_drop
+        }
+        
+        print(f"Ablating {neuron['layer_name']} neuron {neuron['neuron_idx']}: "
+              f"accuracy={ablated_accuracy:.4f}, drop={accuracy_drop:.4f}")
+    
+    # Test combined ablation of top 2-3 neurons
+    print("\nTesting combined ablation of top DIFFERENT-selective neurons:")
+    for k in [2, 3]:
+        if k <= len(top_different_neurons):
+            neurons_to_ablate = [(n['layer_name'], n['neuron_idx']) for n in top_different_neurons[:k]]
+            ablation_spec = {
+                'type': 'multiple',
+                'neurons': neurons_to_ablate
+            }
+            
+            combined_accuracy = calculate_accuracy(model, test_loader, device, analyzer, ablation_spec)
+            combined_drop = baseline_accuracy - combined_accuracy
+            
+            print(f"Combined ablation of top {k} neurons: "
+                  f"accuracy={combined_accuracy:.4f}, drop={combined_drop:.4f}")
+    
+    # Step 4: Random ablation controls
+    print("\n=== STEP 4: RANDOM ABLATION CONTROLS ===")
+    
+    # Get all available neurons for random sampling
+    all_neurons = []
+    for layer_name, neurons in selectivity_results.items():
+        for neuron in neurons:
+            all_neurons.append((layer_name, neuron['neuron_idx']))
+    
+    # Test random ablations
+    random_results = []
+    num_random_tests = 10
+    
+    print(f"Testing {num_random_tests} random ablations...")
+    for i in range(num_random_tests):
+        # Sample 3 random neurons
+        random_neurons = random.sample(all_neurons, min(3, len(all_neurons)))
+        
+        ablation_spec = {
+            'type': 'multiple',
+            'neurons': random_neurons
+        }
+        
+        random_accuracy = calculate_accuracy(model, test_loader, device, analyzer, ablation_spec)
+        random_drop = baseline_accuracy - random_accuracy
+        random_results.append(random_drop)
+        
+        print(f"Random ablation {i+1}: accuracy={random_accuracy:.4f}, drop={random_drop:.4f}")
+    
+    # Step 5: Statistical comparison
+    print("\n=== STEP 5: STATISTICAL COMPARISON ===")
+    
+    # Compare targeted vs random ablations
+    targeted_drops = [res['accuracy_drop'] for res in individual_results.values()]
+    mean_targeted_drop = np.mean(targeted_drops)
+    mean_random_drop = np.mean(random_results)
+    std_random_drop = np.std(random_results)
+    
+    print(f"Mean targeted ablation drop: {mean_targeted_drop:.4f}")
+    print(f"Mean random ablation drop: {mean_random_drop:.4f} ± {std_random_drop:.4f}")
+    print(f"Difference: {mean_targeted_drop - mean_random_drop:.4f}")
+    
+    # Statistical significance test
+    try:
+        t_stat, p_value = ttest_ind(targeted_drops, random_results)
+        print(f"T-test p-value: {p_value:.4f}")
+        if p_value < 0.05:
+            print("*** SIGNIFICANT: Targeted ablations cause significantly more damage than random!")
+        else:
+            print("Not significant: Targeted ablations not significantly different from random")
+    except:
+        print("Could not compute statistical test")
+    
+    # Step 6: Save results
+    print("\n=== STEP 6: SAVING RESULTS ===")
+    
+    results = {
+        'baseline_accuracy': baseline_accuracy,
+        'top_different_neurons': top_different_neurons,
+        'individual_ablation_results': individual_results,
+        'random_ablation_results': random_results,
+        'statistical_comparison': {
+            'mean_targeted_drop': mean_targeted_drop,
+            'mean_random_drop': mean_random_drop,
+            'std_random_drop': std_random_drop,
+            'statistical_test': {
+                't_stat': t_stat if 't_stat' in locals() else None,
+                'p_value': p_value if 'p_value' in locals() else None
+            }
+        }
+    }
+    
+    # Save results
+    os.makedirs('results/ablation_experiment', exist_ok=True)
+    with open('results/ablation_experiment/enhanced_ablation_results.json', 'w') as f:
+        # Convert numpy types for JSON serialization
+        json_results = {}
+        for key, value in results.items():
+            if isinstance(value, np.ndarray):
+                json_results[key] = value.tolist()
+            elif isinstance(value, (np.integer, np.floating)):
+                json_results[key] = value.item()
+            else:
+                json_results[key] = value
+        json.dump(json_results, f, indent=2, default=str)
+    
+    print("Results saved to results/ablation_experiment/enhanced_ablation_results.json")
+    
+    # Summary
+    print("\n=== SUMMARY ===")
+    print(f"✓ Identified {len(top_different_neurons)} top DIFFERENT-selective neurons")
+    print(f"✓ Tested targeted ablations vs {num_random_tests} random controls")
+    print(f"✓ Targeted ablations caused {mean_targeted_drop:.4f} average accuracy drop")
+    print(f"✓ Random ablations caused {mean_random_drop:.4f} average accuracy drop")
+    if 'p_value' in locals() and p_value < 0.05:
+        print("✓ CAUSAL EVIDENCE: Targeted ablations significantly more damaging than random!")
+    else:
+        print("⚠ No significant causal evidence found")
 
 if __name__ == '__main__':
     main() 
