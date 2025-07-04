@@ -9,12 +9,14 @@ from collections import defaultdict
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from scipy.stats import ttest_ind
+import learn2learn as l2l
 
 # Add the root directory to the path to allow imports from other directories
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from baselines.models.conv4 import SameDifferentCNN
-from baselines.models.utils import SameDifferentDataset
+# Import the conv2lr model architecture
+from meta_baseline.models.conv2lr import SameDifferentCNN
+from meta_baseline.models.utils_meta import SameDifferentDataset, collate_episodes
 from circuit_analysis.analyzer import CircuitAnalyzer
 
 class SelectivityAnalyzer:
@@ -143,6 +145,82 @@ class SelectivityAnalyzer:
         
         return all_neurons[:top_k]
 
+def train_quick_model(device, data_dir, output_dir, epochs=20):
+    """Train a quick conv2lr model locally for ablation testing"""
+    print(f"Training a quick conv2lr model locally...")
+    
+    # Create model
+    model = SameDifferentCNN().to(device)
+    
+    # Create MAML wrapper
+    maml = l2l.algorithms.MAML(
+        model,
+        lr=0.05,
+        first_order=False,
+        allow_unused=True,
+        allow_nograd=True
+    )
+    
+    optimizer = torch.optim.Adam(maml.parameters(), lr=0.001)
+    
+    # Create datasets - use fewer tasks for quick training
+    train_tasks = ['regular', 'lines', 'filled']  # Just 3 tasks for quick training
+    train_dataset = SameDifferentDataset(data_dir, train_tasks, 'train', support_sizes=[4])
+    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, 
+                            num_workers=2, pin_memory=True, collate_fn=collate_episodes)
+    
+    print(f"Training for {epochs} epochs...")
+    
+    for epoch in range(epochs):
+        model.train()
+        total_loss = 0
+        num_batches = 0
+        
+        for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}", leave=False):
+            optimizer.zero_grad()
+            
+            learner = maml.clone()
+            
+            # Get support and query data
+            support_images = batch['support_images'].to(device).squeeze(0)
+            support_labels = batch['support_labels'].to(device).squeeze(0)
+            query_images = batch['query_images'].to(device).squeeze(0)
+            query_labels = batch['query_labels'].to(device).squeeze(0)
+            
+            # Adaptation steps
+            for _ in range(3):  # 3 adaptation steps
+                preds = learner(support_images)
+                loss = torch.nn.functional.cross_entropy(preds, support_labels)
+                learner.adapt(loss, allow_unused=True)
+            
+            # Query loss
+            query_preds = learner(query_images)
+            query_loss = torch.nn.functional.cross_entropy(query_preds, query_labels)
+            
+            query_loss.backward()
+            optimizer.step()
+            
+            total_loss += query_loss.item()
+            num_batches += 1
+            
+            if num_batches >= 50:  # Limit batches per epoch for quick training
+                break
+        
+        avg_loss = total_loss / num_batches
+        print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+    
+    # Save the trained model
+    os.makedirs(output_dir, exist_ok=True)
+    model_path = os.path.join(output_dir, 'quick_trained_model.pt')
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'epoch': epochs,
+        'architecture': 'conv2lr'
+    }, model_path)
+    
+    print(f"Quick model saved to {model_path}")
+    return model_path
+
 def calculate_accuracy(model, data_loader, device, analyzer=None, ablation_spec=None):
     """Calculate model accuracy with optional ablation"""
     model.eval()
@@ -180,35 +258,34 @@ def main():
     """Main function to run the enhanced ablation experiment"""
     # Setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if not torch.cuda.is_available():
+        print("WARNING: CUDA not available, using CPU. This will be slow.")
     print(f"Using device: {device}")
     
-    # Load model
-    model_path = './results/naturalistic/vanilla/conv4/seed_42/best_model.pt'
-    model = SameDifferentCNN()
+    # Local data directories
+    data_dir = 'data/meta_h5/pb'
+    output_dir = 'results/local_ablation_experiment'
     
-    # Load model state dict
-    checkpoint = torch.load(model_path, map_location=device)
-    state_dict = checkpoint['model_state_dict']
+    # Check if we have a trained model, if not train one quickly
+    model_path = os.path.join(output_dir, 'quick_trained_model.pt')
     
-    if next(iter(state_dict)).startswith('module.'):
-        from collections import OrderedDict
-        new_state_dict = OrderedDict()
-        for k, v in state_dict.items():
-            name = k[7:]  # remove `module.`
-            new_state_dict[name] = v
-        model.load_state_dict(new_state_dict, strict=False)
+    if not os.path.exists(model_path):
+        print("No trained model found. Training a quick model locally...")
+        model_path = train_quick_model(device, data_dir, output_dir, epochs=10)
     else:
-        model.load_state_dict(state_dict, strict=False)
+        print(f"Using existing trained model: {model_path}")
     
-    model.to(device)
+    # Load the trained model
+    model = SameDifferentCNN().to(device)
+    checkpoint = torch.load(model_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
     print(f"Loaded model from {model_path}")
     
-    # Load data
-    data_dir = 'data/meta_h5/pb'
-    task = 'regular'
-    test_dataset = SameDifferentDataset(data_dir, [task], 'test', support_sizes=[4])
-    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-    print(f"Loaded '{task}' test dataset.")
+    # Create test dataset - use regular task for testing
+    test_tasks = ['regular']
+    test_dataset = SameDifferentDataset(data_dir, test_tasks, 'test', support_sizes=[4])
+    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers=2)
+    print(f"Loaded test dataset with {len(test_dataset)} examples")
     
     # Step 1: Analyze selectivity to find DIFFERENT-selective neurons
     print("\n=== STEP 1: SELECTIVITY ANALYSIS ===")
@@ -222,6 +299,28 @@ def main():
     for i, neuron in enumerate(top_different_neurons):
         print(f"  {i+1}. {neuron['layer_name']} neuron {neuron['neuron_idx']}: "
               f"selectivity={neuron['selectivity']:.4f}, p={neuron['p_value']:.4f}")
+    
+    if len(top_different_neurons) == 0:
+        print("No statistically significant DIFFERENT-selective neurons found.")
+        print("This might be due to:")
+        print("1. Limited training (only 10 epochs)")
+        print("2. Random initialization dominating")
+        print("3. Need more training data")
+        print("\nProceeding with most selective neurons regardless of significance...")
+        
+        # Get top 3 most DIFFERENT-selective neurons regardless of significance
+        all_neurons = []
+        for layer_name, neurons in selectivity_results.items():
+            diff_neurons = [n for n in neurons if n['selectivity'] < 0]
+            all_neurons.extend(diff_neurons)
+        
+        all_neurons.sort(key=lambda x: x['selectivity'])
+        top_different_neurons = all_neurons[:3]
+        
+        print(f"\nTop 3 most DIFFERENT-selective neurons (regardless of significance):")
+        for i, neuron in enumerate(top_different_neurons):
+            print(f"  {i+1}. {neuron['layer_name']} neuron {neuron['neuron_idx']}: "
+                  f"selectivity={neuron['selectivity']:.4f}, p={neuron['p_value']:.4f}")
     
     # Step 2: Baseline accuracy
     print("\n=== STEP 2: BASELINE ACCURACY ===")
@@ -341,8 +440,8 @@ def main():
     }
     
     # Save results
-    os.makedirs('results/ablation_experiment', exist_ok=True)
-    with open('results/ablation_experiment/enhanced_ablation_results.json', 'w') as f:
+    os.makedirs(output_dir, exist_ok=True)
+    with open(os.path.join(output_dir, 'enhanced_ablation_results.json'), 'w') as f:
         # Convert numpy types for JSON serialization
         json_results = {}
         for key, value in results.items():
@@ -354,18 +453,19 @@ def main():
                 json_results[key] = value
         json.dump(json_results, f, indent=2, default=str)
     
-    print("Results saved to results/ablation_experiment/enhanced_ablation_results.json")
+    print(f"Results saved to {os.path.join(output_dir, 'enhanced_ablation_results.json')}")
     
     # Summary
     print("\n=== SUMMARY ===")
+    print(f"✓ Trained local conv2lr model (quick training)")
     print(f"✓ Identified {len(top_different_neurons)} top DIFFERENT-selective neurons")
     print(f"✓ Tested targeted ablations vs {num_random_tests} random controls")
     print(f"✓ Targeted ablations caused {mean_targeted_drop:.4f} average accuracy drop")
     print(f"✓ Random ablations caused {mean_random_drop:.4f} average accuracy drop")
-    if 'p_value' in locals() and p_value < 0.05:
+    if 't_stat' in locals() and 'p_value' in locals() and p_value < 0.05:
         print("✓ CAUSAL EVIDENCE: Targeted ablations significantly more damaging than random!")
     else:
-        print("⚠ No significant causal evidence found")
+        print("⚠ No significant causal evidence found (may need more training)")
 
 if __name__ == '__main__':
     main() 
