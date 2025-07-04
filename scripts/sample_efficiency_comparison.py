@@ -256,7 +256,17 @@ def train_fomaml(args, device, save_dir):
     
     # Create model and MAML wrapper
     model = SameDifferentCNN().to(device)
-    maml = l2l.algorithms.MAML(model, lr=args.inner_lr, first_order=True, allow_unused=True)
+    maml = l2l.algorithms.MAML(
+        model, 
+        lr=args.inner_lr, 
+        first_order=True, 
+        allow_unused=True,
+        allow_nograd=True
+    )
+    
+    # Ensure all parameters require gradients
+    for param in maml.parameters():
+        param.requires_grad = True
     
     # Create datasets
     train_dataset = SameDifferentDataset(
@@ -361,7 +371,17 @@ def train_second_order_maml(args, device, save_dir):
     
     # Create model and MAML wrapper
     model = SameDifferentCNN().to(device)
-    maml = l2l.algorithms.MAML(model, lr=args.inner_lr, first_order=False, allow_unused=True)
+    maml = l2l.algorithms.MAML(
+        model, 
+        lr=args.inner_lr, 
+        first_order=False, 
+        allow_unused=True,
+        allow_nograd=True
+    )
+    
+    # Ensure all parameters require gradients
+    for param in maml.parameters():
+        param.requires_grad = True
     
     # Create datasets (same as FOMAML)
     train_dataset = SameDifferentDataset(
