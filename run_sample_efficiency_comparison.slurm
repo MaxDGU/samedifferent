@@ -32,9 +32,9 @@ python scripts/sample_efficiency_comparison.py \
     --seed 42 \
     --meta_batch_size 8 \
     --vanilla_batch_size 32 \
-    --inner_lr 0.001 \
-    --outer_lr 0.0001 \
-    --vanilla_lr 0.001 \
+    --inner_lr 0.05 \
+    --outer_lr 0.001 \
+    --vanilla_lr 0.0001 \
     --adaptation_steps 5 \
     --val_frequency 500 \
     --save_dir results/sample_efficiency_comparison \

@@ -255,6 +255,7 @@ def validate_vanilla_model(model, val_loader, device, loss_fn):
 def train_fomaml(args, device, save_dir):
     """Train First-Order MAML."""
     print("Training First-Order MAML...")
+    print(f"Parameters: inner_lr={args.inner_lr}, outer_lr={args.outer_lr}, adaptation_steps={args.adaptation_steps}")
     
     # Create model and MAML wrapper
     model = SameDifferentCNN().to(device)
@@ -269,6 +270,14 @@ def train_fomaml(args, device, save_dir):
     # Ensure all parameters require gradients
     for param in maml.parameters():
         param.requires_grad = True
+    
+    # Validation: Check parameter count and gradient setup
+    total_params = sum(p.numel() for p in maml.parameters())
+    trainable_params = sum(p.numel() for p in maml.parameters() if p.requires_grad)
+    print(f"Model parameters: {total_params:,} total, {trainable_params:,} trainable")
+    
+    if trainable_params == 0:
+        raise ValueError("No trainable parameters found!")
     
     # Create datasets
     train_dataset = SameDifferentDataset(
@@ -329,7 +338,25 @@ def train_fomaml(args, device, save_dir):
             batch_loss /= len(batch)
             batch_acc /= len(batch)
             
+            # Validation checks
+            if torch.isnan(batch_loss) or torch.isinf(batch_loss):
+                print(f"WARNING: Invalid loss detected at epoch {epoch+1}, batch {batch_idx}: {batch_loss}")
+                continue
+            
             batch_loss.backward()
+            
+            # Check gradients
+            grad_norm = 0.0
+            for param in maml.parameters():
+                if param.grad is not None:
+                    grad_norm += param.grad.data.norm(2).item() ** 2
+            grad_norm = grad_norm ** 0.5
+            
+            if grad_norm == 0.0:
+                print(f"WARNING: Zero gradient norm at epoch {epoch+1}, batch {batch_idx}")
+            elif grad_norm > 100.0:
+                print(f"WARNING: Large gradient norm {grad_norm:.2f} at epoch {epoch+1}, batch {batch_idx}")
+            
             optimizer.step()
             
             epoch_loss += batch_loss.item()
@@ -338,10 +365,19 @@ def train_fomaml(args, device, save_dir):
             
             # Validate every few batches
             if batch_idx % args.val_frequency == 0:
+                print(f"\n--- Validation at Batch {batch_idx} ---")
                 val_loss, val_acc = validate_meta_model(maml, val_loader, device, args.adaptation_steps, loss_fn)
                 data_points_seen.append(total_data_points)
                 val_accuracies.append(val_acc * 100)  # Convert to percentage
-                print(f"  Batch {batch_idx}: Data points seen: {total_data_points}, Val Acc: {val_acc*100:.2f}%")
+                current_train_acc = epoch_acc / max(1, batch_idx + 1) * 100
+                print(f"  Data points seen: {total_data_points:,}")
+                print(f"  Current train accuracy: {current_train_acc:.2f}%")
+                print(f"  Validation accuracy: {val_acc*100:.2f}%")
+                print(f"  Validation loss: {val_loss:.4f}")
+                if len(val_accuracies) > 1:
+                    acc_improvement = val_accuracies[-1] - val_accuracies[-2]
+                    print(f"  Accuracy improvement: {acc_improvement:+.2f}%")
+                print("-" * 40)
         
         # End of epoch validation
         val_loss, val_acc = validate_meta_model(maml, val_loader, device, args.adaptation_steps, loss_fn)
@@ -353,6 +389,30 @@ def train_fomaml(args, device, save_dir):
         
         print(f"FOMAML Epoch {epoch+1}: Train Loss: {avg_loss:.4f}, Train Acc: {avg_acc*100:.2f}%, "
               f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc*100:.2f}%")
+    
+    # Training summary and validation checks
+    print(f"\n{'='*50}")
+    print("FOMAML Training Summary")
+    print(f"{'='*50}")
+    print(f"Total data points processed: {total_data_points:,}")
+    print(f"Total validation points: {len(val_accuracies)}")
+    if val_accuracies:
+        initial_acc = val_accuracies[0]
+        final_acc = val_accuracies[-1]
+        max_acc = max(val_accuracies)
+        print(f"Initial validation accuracy: {initial_acc:.2f}%")
+        print(f"Final validation accuracy: {final_acc:.2f}%")
+        print(f"Maximum validation accuracy: {max_acc:.2f}%")
+        print(f"Total improvement: {final_acc - initial_acc:+.2f}%")
+        
+        # Check for learning issues
+        if final_acc - initial_acc < 1.0:
+            print("⚠️  WARNING: Very little learning progress detected!")
+        if max_acc - final_acc > 10.0:
+            print("⚠️  WARNING: Significant overfitting detected!")
+        if max_acc < 60.0:
+            print("⚠️  WARNING: Low maximum accuracy achieved!")
+    print(f"{'='*50}\n")
     
     # Save results
     results = {
@@ -370,6 +430,7 @@ def train_fomaml(args, device, save_dir):
 def train_second_order_maml(args, device, save_dir):
     """Train Second-Order MAML."""
     print("Training Second-Order MAML...")
+    print(f"Parameters: inner_lr={args.inner_lr}, outer_lr={args.outer_lr}, adaptation_steps={args.adaptation_steps}")
     
     # Create model and MAML wrapper
     model = SameDifferentCNN().to(device)
@@ -384,6 +445,14 @@ def train_second_order_maml(args, device, save_dir):
     # Ensure all parameters require gradients
     for param in maml.parameters():
         param.requires_grad = True
+    
+    # Validation: Check parameter count and gradient setup
+    total_params = sum(p.numel() for p in maml.parameters())
+    trainable_params = sum(p.numel() for p in maml.parameters() if p.requires_grad)
+    print(f"Model parameters: {total_params:,} total, {trainable_params:,} trainable")
+    
+    if trainable_params == 0:
+        raise ValueError("No trainable parameters found!")
     
     # Create datasets (same as FOMAML)
     train_dataset = SameDifferentDataset(
@@ -444,7 +513,25 @@ def train_second_order_maml(args, device, save_dir):
             batch_loss /= len(batch)
             batch_acc /= len(batch)
             
+            # Validation checks
+            if torch.isnan(batch_loss) or torch.isinf(batch_loss):
+                print(f"WARNING: Invalid loss detected at epoch {epoch+1}, batch {batch_idx}: {batch_loss}")
+                continue
+            
             batch_loss.backward()
+            
+            # Check gradients
+            grad_norm = 0.0
+            for param in maml.parameters():
+                if param.grad is not None:
+                    grad_norm += param.grad.data.norm(2).item() ** 2
+            grad_norm = grad_norm ** 0.5
+            
+            if grad_norm == 0.0:
+                print(f"WARNING: Zero gradient norm at epoch {epoch+1}, batch {batch_idx}")
+            elif grad_norm > 100.0:
+                print(f"WARNING: Large gradient norm {grad_norm:.2f} at epoch {epoch+1}, batch {batch_idx}")
+            
             optimizer.step()
             
             epoch_loss += batch_loss.item()
@@ -453,10 +540,19 @@ def train_second_order_maml(args, device, save_dir):
             
             # Validate every few batches
             if batch_idx % args.val_frequency == 0:
+                print(f"\n--- Second-Order MAML Validation at Batch {batch_idx} ---")
                 val_loss, val_acc = validate_meta_model(maml, val_loader, device, args.adaptation_steps, loss_fn)
                 data_points_seen.append(total_data_points)
                 val_accuracies.append(val_acc * 100)
-                print(f"  Batch {batch_idx}: Data points seen: {total_data_points}, Val Acc: {val_acc*100:.2f}%")
+                current_train_acc = epoch_acc / max(1, batch_idx + 1) * 100
+                print(f"  Data points seen: {total_data_points:,}")
+                print(f"  Current train accuracy: {current_train_acc:.2f}%")
+                print(f"  Validation accuracy: {val_acc*100:.2f}%")
+                print(f"  Validation loss: {val_loss:.4f}")
+                if len(val_accuracies) > 1:
+                    acc_improvement = val_accuracies[-1] - val_accuracies[-2]
+                    print(f"  Accuracy improvement: {acc_improvement:+.2f}%")
+                print("-" * 40)
         
         # End of epoch validation
         val_loss, val_acc = validate_meta_model(maml, val_loader, device, args.adaptation_steps, loss_fn)
@@ -468,6 +564,30 @@ def train_second_order_maml(args, device, save_dir):
         
         print(f"Second-Order MAML Epoch {epoch+1}: Train Loss: {avg_loss:.4f}, Train Acc: {avg_acc*100:.2f}%, "
               f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc*100:.2f}%")
+    
+    # Training summary and validation checks
+    print(f"\n{'='*50}")
+    print("Second-Order MAML Training Summary")
+    print(f"{'='*50}")
+    print(f"Total data points processed: {total_data_points:,}")
+    print(f"Total validation points: {len(val_accuracies)}")
+    if val_accuracies:
+        initial_acc = val_accuracies[0]
+        final_acc = val_accuracies[-1]
+        max_acc = max(val_accuracies)
+        print(f"Initial validation accuracy: {initial_acc:.2f}%")
+        print(f"Final validation accuracy: {final_acc:.2f}%")
+        print(f"Maximum validation accuracy: {max_acc:.2f}%")
+        print(f"Total improvement: {final_acc - initial_acc:+.2f}%")
+        
+        # Check for learning issues
+        if final_acc - initial_acc < 1.0:
+            print("⚠️  WARNING: Very little learning progress detected!")
+        if max_acc - final_acc > 10.0:
+            print("⚠️  WARNING: Significant overfitting detected!")
+        if max_acc < 60.0:
+            print("⚠️  WARNING: Low maximum accuracy achieved!")
+    print(f"{'='*50}\n")
     
     # Save results
     results = {
@@ -485,9 +605,18 @@ def train_second_order_maml(args, device, save_dir):
 def train_vanilla_sgd(args, device, save_dir):
     """Train Vanilla SGD."""
     print("Training Vanilla SGD...")
+    print(f"Parameters: vanilla_lr={args.vanilla_lr}, batch_size={args.vanilla_batch_size}")
     
     # Create model
     model = SameDifferentCNN().to(device)
+    
+    # Validation: Check parameter count
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Model parameters: {total_params:,} total, {trainable_params:,} trainable")
+    
+    if trainable_params == 0:
+        raise ValueError("No trainable parameters found!")
     
     # Create datasets - flatten episodic data into individual samples for vanilla SGD
     train_dataset = VanillaPBDataset(tasks=ALL_PB_TASKS, split='train', data_dir=args.data_dir)
@@ -526,7 +655,26 @@ def train_vanilla_sgd(args, device, save_dir):
                 outputs = outputs.squeeze()
             
             loss = loss_fn(outputs, labels.float())
+            
+            # Validation checks
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f"WARNING: Invalid loss detected at epoch {epoch+1}, batch {batch_idx}: {loss}")
+                continue
+            
             loss.backward()
+            
+            # Check gradients
+            grad_norm = 0.0
+            for param in model.parameters():
+                if param.grad is not None:
+                    grad_norm += param.grad.data.norm(2).item() ** 2
+            grad_norm = grad_norm ** 0.5
+            
+            if grad_norm == 0.0:
+                print(f"WARNING: Zero gradient norm at epoch {epoch+1}, batch {batch_idx}")
+            elif grad_norm > 100.0:
+                print(f"WARNING: Large gradient norm {grad_norm:.2f} at epoch {epoch+1}, batch {batch_idx}")
+            
             optimizer.step()
             
             # Track metrics
@@ -538,10 +686,19 @@ def train_vanilla_sgd(args, device, save_dir):
             
             # Validate every few batches
             if batch_idx % args.val_frequency == 0:
+                print(f"\n--- Vanilla SGD Validation at Batch {batch_idx} ---")
                 val_loss, val_acc = validate_vanilla_model(model, val_loader, device, loss_fn)
                 data_points_seen.append(total_data_points)
                 val_accuracies.append(val_acc)  # val_acc is already in percentage format
-                print(f"  Batch {batch_idx}: Data points seen: {total_data_points}, Val Acc: {val_acc:.2f}%")
+                current_train_acc = 100.0 * epoch_correct / max(1, epoch_total)
+                print(f"  Data points seen: {total_data_points:,}")
+                print(f"  Current train accuracy: {current_train_acc:.2f}%")
+                print(f"  Validation accuracy: {val_acc:.2f}%")
+                print(f"  Validation loss: {val_loss:.4f}")
+                if len(val_accuracies) > 1:
+                    acc_improvement = val_accuracies[-1] - val_accuracies[-2]
+                    print(f"  Accuracy improvement: {acc_improvement:+.2f}%")
+                print("-" * 40)
         
         # End of epoch validation
         val_loss, val_acc = validate_vanilla_model(model, val_loader, device, loss_fn)
@@ -553,6 +710,30 @@ def train_vanilla_sgd(args, device, save_dir):
         
         print(f"Vanilla SGD Epoch {epoch+1}: Train Loss: {avg_loss:.4f}, Train Acc: {avg_acc:.2f}%, "
               f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+    
+    # Training summary and validation checks
+    print(f"\n{'='*50}")
+    print("Vanilla SGD Training Summary")
+    print(f"{'='*50}")
+    print(f"Total data points processed: {total_data_points:,}")
+    print(f"Total validation points: {len(val_accuracies)}")
+    if val_accuracies:
+        initial_acc = val_accuracies[0]
+        final_acc = val_accuracies[-1]
+        max_acc = max(val_accuracies)
+        print(f"Initial validation accuracy: {initial_acc:.2f}%")
+        print(f"Final validation accuracy: {final_acc:.2f}%")
+        print(f"Maximum validation accuracy: {max_acc:.2f}%")
+        print(f"Total improvement: {final_acc - initial_acc:+.2f}%")
+        
+        # Check for learning issues
+        if final_acc - initial_acc < 1.0:
+            print("⚠️  WARNING: Very little learning progress detected!")
+        if max_acc - final_acc > 10.0:
+            print("⚠️  WARNING: Significant overfitting detected!")
+        if max_acc < 60.0:
+            print("⚠️  WARNING: Low maximum accuracy achieved!")
+    print(f"{'='*50}\n")
     
     # Save results
     results = {
@@ -610,9 +791,9 @@ def main():
     # Meta-learning parameters
     parser.add_argument('--meta_batch_size', type=int, default=32, 
                        help='Meta batch size')
-    parser.add_argument('--inner_lr', type=float, default=0.001, 
+    parser.add_argument('--inner_lr', type=float, default=0.05, 
                        help='Inner loop learning rate')
-    parser.add_argument('--outer_lr', type=float, default=0.0001, 
+    parser.add_argument('--outer_lr', type=float, default=0.001, 
                        help='Outer loop learning rate')
     parser.add_argument('--adaptation_steps', type=int, default=5, 
                        help='Number of adaptation steps')
@@ -620,11 +801,11 @@ def main():
     # Vanilla SGD parameters
     parser.add_argument('--vanilla_batch_size', type=int, default=32, 
                        help='Vanilla SGD batch size')
-    parser.add_argument('--vanilla_lr', type=float, default=1e-3, 
+    parser.add_argument('--vanilla_lr', type=float, default=1e-4, 
                        help='Vanilla SGD learning rate')
     
     # Validation and saving
-    parser.add_argument('--val_frequency', type=int, default=1000, 
+    parser.add_argument('--val_frequency', type=int, default=500, 
                        help='Validation frequency (in batches)')
     parser.add_argument('--save_dir', type=str, default='results/sample_efficiency_comparison', 
                        help='Directory to save results')
