@@ -110,10 +110,10 @@ def check_model_imports():
         return False
     
     try:
-        from data.vanilla_h5_dataset_creation import PB_dataset_h5
-        print("✅ PB_dataset_h5 - Available")
+        import h5py
+        print("✅ h5py (for vanilla data loading) - Available")
     except ImportError as e:
-        print(f"❌ PB_dataset_h5 - Import failed: {e}")
+        print(f"❌ h5py (for vanilla data loading) - Import failed: {e}")
         return False
     
     return True
@@ -123,16 +123,32 @@ def test_data_loading():
     print("\n=== Testing Data Loading ===")
     
     try:
-        from data.vanilla_h5_dataset_creation import PB_dataset_h5
-        
-        # Test vanilla dataset loading
+        # Test vanilla dataset loading with inline implementation
         print("Testing vanilla dataset loading...")
-        dataset = PB_dataset_h5(task='regular', split='train', data_dir='data/meta_h5/pb')
-        print(f"✅ Vanilla dataset loaded: {len(dataset)} samples")
         
-        if len(dataset) > 0:
-            image, label = dataset[0]
-            print(f"  Sample shape: {image.shape}, Label: {label}")
+        # Simple inline test of H5 loading and flattening
+        import h5py
+        data_dir = 'data/meta_h5/pb'
+        test_file = os.path.join(data_dir, 'regular_support4_train.h5')
+        
+        if os.path.exists(test_file):
+            with h5py.File(test_file, 'r') as f:
+                support_images = f['support_images'][:]  # Test reading
+                support_labels = f['support_labels'][:]  # Test reading
+                num_episodes, support_size, H, W, C = support_images.shape
+                
+                # Test flattening
+                flat_images = support_images.reshape(-1, H, W, C)
+                flat_labels = support_labels.reshape(-1)
+                
+                print(f"✅ Vanilla dataset loading test passed")
+                print(f"  Original shape: {support_images.shape}")
+                print(f"  Flattened: {flat_images.shape[0]} samples")
+                print(f"  Sample image shape: {flat_images[0].shape}")
+                print(f"  Sample label: {flat_labels[0]}")
+        else:
+            print(f"❌ Test file not found: {test_file}")
+            return False
         
     except Exception as e:
         print(f"❌ Vanilla dataset loading failed: {e}")

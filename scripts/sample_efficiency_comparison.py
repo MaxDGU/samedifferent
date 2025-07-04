@@ -40,7 +40,7 @@ if cwd not in sys.path and os.path.exists(os.path.join(cwd, 'meta_baseline')):
 import learn2learn as l2l
 from meta_baseline.models.conv6lr import SameDifferentCNN
 from meta_baseline.models.utils_meta import SameDifferentDataset, collate_episodes
-from data.vanilla_h5_dataset_creation import PB_dataset_h5
+import h5py
 
 # Define PB tasks
 ALL_PB_TASKS = [
@@ -51,6 +51,81 @@ ALL_PB_TASKS = [
 # Support and query sizes for meta-learning
 VARIABLE_SUPPORT_SIZES = [4, 6, 8, 10]
 FIXED_QUERY_SIZE = 2
+
+class VanillaPBDataset(torch.utils.data.Dataset):
+    """
+    Simple dataset that flattens meta-learning H5 episodes into individual samples for vanilla SGD.
+    """
+    def __init__(self, tasks, split='train', data_dir='data/meta_h5/pb', support_sizes=[4, 6, 8, 10]):
+        self.images = []
+        self.labels = []
+        
+        print(f"Loading vanilla dataset for {split} split...")
+        for task in tasks:
+            for support_size in support_sizes:
+                filename = f"{task}_support{support_size}_{split}.h5"
+                filepath = os.path.join(data_dir, filename)
+                
+                if not os.path.exists(filepath):
+                    print(f"Warning: File not found: {filepath}")
+                    continue
+                
+                print(f"Loading {filename} for vanilla dataset...")
+                with h5py.File(filepath, 'r') as f:
+                    # Load support images and labels
+                    if 'support_images' in f and 'support_labels' in f:
+                        support_images = f['support_images'][:]  # Shape: (episodes, support_size, H, W, C)
+                        support_labels = f['support_labels'][:]  # Shape: (episodes, support_size)
+                        
+                        # Flatten episodes and support examples into individual samples
+                        num_episodes, support_size_actual, H, W, C = support_images.shape
+                        support_images = support_images.reshape(-1, H, W, C)  # (episodes * support_size, H, W, C)
+                        support_labels = support_labels.reshape(-1)  # (episodes * support_size,)
+                        
+                        self.images.append(support_images)
+                        self.labels.append(support_labels)
+                    
+                    # Load query images and labels
+                    if 'query_images' in f and 'query_labels' in f:
+                        query_images = f['query_images'][:]  # Shape: (episodes, query_size, H, W, C)
+                        query_labels = f['query_labels'][:]  # Shape: (episodes, query_size)
+                        
+                        # Flatten episodes and query examples into individual samples
+                        num_episodes, query_size_actual, H, W, C = query_images.shape
+                        query_images = query_images.reshape(-1, H, W, C)  # (episodes * query_size, H, W, C)
+                        query_labels = query_labels.reshape(-1)  # (episodes * query_size,)
+                        
+                        self.images.append(query_images)
+                        self.labels.append(query_labels)
+        
+        if self.images:
+            # Concatenate all images and labels
+            self.images = np.concatenate(self.images, axis=0)
+            self.labels = np.concatenate(self.labels, axis=0)
+            
+            print(f"Loaded {len(self.images)} individual samples for vanilla SGD ({split} split)")
+        else:
+            print(f"No data loaded for vanilla SGD ({split} split)")
+            self.images = np.array([])
+            self.labels = np.array([])
+    
+    def __len__(self):
+        return len(self.images)
+    
+    def __getitem__(self, idx):
+        if len(self.images) == 0:
+            raise IndexError("No data available")
+        
+        # Get image and label
+        image = self.images[idx]  # Shape: (H, W, C)
+        label = self.labels[idx]  # Scalar
+        
+        # Convert to tensor and normalize
+        # Convert from HWC to CHW format and normalize to [0, 1]
+        image = torch.FloatTensor(image.transpose(2, 0, 1)) / 255.0
+        label = torch.tensor(int(label), dtype=torch.long)
+        
+        return image, label
 
 def accuracy(predictions, targets):
     """Binary classification accuracy using raw logits."""
@@ -348,15 +423,9 @@ def train_vanilla_sgd(args, device, save_dir):
     # Create model
     model = SameDifferentCNN().to(device)
     
-    # Create datasets - use meta_h5 data directory since that's where the actual data is
-    # The vanilla dataset class will flatten the episodic data into individual samples
-    train_datasets = [PB_dataset_h5(task=t, split='train', data_dir=args.data_dir) 
-                     for t in ALL_PB_TASKS]
-    val_datasets = [PB_dataset_h5(task=t, split='val', data_dir=args.data_dir) 
-                   for t in ALL_PB_TASKS]
-    
-    train_dataset = ConcatDataset(train_datasets)
-    val_dataset = ConcatDataset(val_datasets)
+    # Create datasets - flatten episodic data into individual samples for vanilla SGD
+    train_dataset = VanillaPBDataset(tasks=ALL_PB_TASKS, split='train', data_dir=args.data_dir)
+    val_dataset = VanillaPBDataset(tasks=ALL_PB_TASKS, split='val', data_dir=args.data_dir)
     
     train_loader = DataLoader(train_dataset, batch_size=args.vanilla_batch_size, 
                              shuffle=True, num_workers=4, pin_memory=True)

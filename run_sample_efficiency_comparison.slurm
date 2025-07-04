@@ -38,7 +38,7 @@ python scripts/sample_efficiency_comparison.py \
     --val_frequency 25 \
     --save_dir results/sample_efficiency_comparison \
     --methods fomaml second_order vanilla \
-    --data_dir data/meta_h5/pb
+    --data_dir /scratch/gpfs/mg7411/samedifferent/data/meta_h5/pb
 
 # After completion, generate plots
 python scripts/plot_sample_efficiency_results.py \
