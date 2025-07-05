@@ -112,7 +112,7 @@ def test_holdout_setup():
         print(f"✅ Model created: {total_params:,} parameters")
         
         # Test forward pass
-        test_input = torch.randn(1, 3, 224, 224).to(device)
+        test_input = torch.randn(1, 3, 128, 128).to(device)
         output = model(test_input)
         print(f"✅ Forward pass successful: {output.shape}")
         
