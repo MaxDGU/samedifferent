@@ -200,20 +200,20 @@ class MultiSeedOODAnalysis:
                     cohens_d = np.mean(diff) / pooled_std if pooled_std > 0 else 0
                     
                     comparisons[f"{method1}_vs_{method2}"] = {
-                        't_statistic': t_stat,
-                        'p_value': p_value,
-                        'cohens_d': cohens_d,
-                        'mean_diff': np.mean(diff),
-                        'significant': p_value < 0.05,
+                        't_statistic': float(t_stat),
+                        'p_value': float(p_value),
+                        'cohens_d': float(cohens_d),
+                        'mean_diff': float(np.mean(diff)),
+                        'significant': bool(p_value < 0.05),
                         'effect_size': 'small' if abs(cohens_d) < 0.5 else 'medium' if abs(cohens_d) < 0.8 else 'large'
                     }
             
             statistical_results[f"point_{i+1}"] = {
-                'data_points': key_points[i],
+                'data_points': float(key_points[i]),
                 'comparisons': comparisons,
-                'means': {method: np.mean(point_data[method]) for method in point_data},
-                'stds': {method: np.std(point_data[method]) for method in point_data},
-                'sems': {method: stats.sem(point_data[method]) for method in point_data}
+                'means': {method: float(np.mean(point_data[method])) for method in point_data},
+                'stds': {method: float(np.std(point_data[method])) for method in point_data},
+                'sems': {method: float(stats.sem(point_data[method])) for method in point_data}
             }
         
         # Overall curve analysis
@@ -225,9 +225,9 @@ class MultiSeedOODAnalysis:
                 'std_curve': np.std(curves, axis=0),
                 'sem_curve': stats.sem(curves, axis=0),
                 'final_performance': {
-                    'mean': np.mean(curves[:, -1]),
-                    'std': np.std(curves[:, -1]),
-                    'sem': stats.sem(curves[:, -1])
+                    'mean': float(np.mean(curves[:, -1])),
+                    'std': float(np.std(curves[:, -1])),
+                    'sem': float(stats.sem(curves[:, -1]))
                 }
             }
         
@@ -367,6 +367,24 @@ class MultiSeedOODAnalysis:
         """Save detailed statistical analysis report."""
         print("\n📝 Saving statistical analysis report...")
         
+        # Create JSON-serializable copy of statistical results
+        serializable_results = {
+            'key_points': self.statistical_results['key_points'],
+            'overall_stats': {},
+            'key_sample_sizes': self.statistical_results['key_sample_sizes'].tolist(),
+            'n_seeds': self.statistical_results['n_seeds']
+        }
+        
+        # Convert numpy arrays to lists for JSON serialization
+        for method in self.statistical_results['overall_stats']:
+            method_stats = self.statistical_results['overall_stats'][method]
+            serializable_results['overall_stats'][method] = {
+                'mean_curve': method_stats['mean_curve'].tolist(),
+                'std_curve': method_stats['std_curve'].tolist(),
+                'sem_curve': method_stats['sem_curve'].tolist(),
+                'final_performance': method_stats['final_performance']
+            }
+        
         # Create comprehensive report
         report = {
             'experiment_info': {
@@ -376,7 +394,7 @@ class MultiSeedOODAnalysis:
                 'n_seeds': len(self.results_data),
                 'analysis_timestamp': datetime.now().isoformat()
             },
-            'statistical_results': self.statistical_results,
+            'statistical_results': serializable_results,
             'summary': {
                 'significant_differences': {},
                 'effect_sizes': {},
