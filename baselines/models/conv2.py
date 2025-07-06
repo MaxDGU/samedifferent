@@ -96,4 +96,4 @@ class SameDifferentCNN(nn.Module):
         x = self.dropout2(F.relu(self.fc2(x)))
         x = self.dropout3(F.relu(self.fc3(x)))
         
-        return x
+        return self.classifier(x)
