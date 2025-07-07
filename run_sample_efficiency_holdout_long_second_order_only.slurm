@@ -2,7 +2,7 @@
 #SBATCH --job-name=sample_efficiency_ood_long_second_order_only
 #SBATCH --output=logs/sample_efficiency_ood_long_second_order_only_%j.out
 #SBATCH --error=logs/sample_efficiency_ood_long_second_order_only_%j.err
-#SBATCH --time=48:00:00
+#SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -26,21 +26,21 @@ echo "==========================================================================
 echo "This experiment completes the Second-Order MAML portion of the OOD comparison:"
 echo "- Training on 9 tasks, validating on 1 HELD-OUT task"
 echo "- Tests novel task generalization (OOD performance)"
-echo "- EXTENDED TIME ALLOCATION: 48 hours to ensure completion"
+echo "- TIME ALLOCATION: 12 hours with checkpointing for resume capability"
 echo ""
 echo "LONG VERSION PARAMETERS:"
 echo "- Adaptation steps: 10 (training) / 15 (testing)"
 echo "- Epochs: 25 (thorough evaluation)"
 echo "- Validation frequency: 1000 (more frequent monitoring)"
 echo "- Meta batch size: 16"
-echo "- Expected runtime: 24-48 hours"
+echo "- Expected runtime: 12+ hours (with checkpointing for resume)"
 echo ""
 echo "Holdout task: 'scrambled' (visually challenging variant)"
 echo "Training tasks: regular, lines, open, wider_line, random_color, arrows, irregular, filled, original"
 echo "METHOD: Second-Order MAML ONLY"
 echo ""
 
-python scripts/sample_efficiency_comparison_holdout_long.py \
+python scripts/sample_efficiency_comparison_holdout_long_with_checkpointing.py \
     --epochs 25 \
     --seed 42 \
     --holdout_task scrambled \
@@ -53,7 +53,7 @@ python scripts/sample_efficiency_comparison_holdout_long.py \
     --test_adaptation_steps 15 \
     --val_frequency 1000 \
     --save_dir results/sample_efficiency_ood_long \
-    --methods second_order \
+
     --data_dir /scratch/gpfs/mg7411/samedifferent/data/meta_h5/pb
 
 echo ""
@@ -63,4 +63,6 @@ echo "Results saved to: results/sample_efficiency_ood_long/holdout_scrambled/see
 echo ""
 echo "This completes the Second-Order MAML portion of the OOD comparison."
 echo "Results can be combined with previously completed FOMAML results."
+echo ""
+echo "If the job was terminated early, resubmit this script to resume from checkpoint."
 echo "==================================================================================================" 
