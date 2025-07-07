@@ -43,15 +43,12 @@ python scripts/sample_efficiency_comparison_long_with_checkpointing.py \
     --epochs 25 \
     --seed 42 \
     --meta_batch_size 16 \
-    --vanilla_batch_size 64 \
     --inner_lr 0.05 \
     --outer_lr 0.001 \
-    --vanilla_lr 0.0001 \
     --adaptation_steps 10 \
     --test_adaptation_steps 15 \
     --val_frequency 1000 \
     --save_dir results/sample_efficiency_comparison_long \
-
     --data_dir /scratch/gpfs/mg7411/samedifferent/data/meta_h5/pb
 
 echo ""
