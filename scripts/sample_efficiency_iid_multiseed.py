@@ -5,8 +5,7 @@ Multi-Seed IID Sample Efficiency Comparison with Statistical Analysis
 This script runs the in-distribution sample efficiency experiment across multiple seeds 
 and performs comprehensive statistical analysis with publication-quality visualizations.
 
-Unlike the OOD holdout experiment, this tests all methods on the same distribution
-for both training and validation (all PB tasks).
+It now integrates SLURM for robust execution and includes checkpointing.
 """
 
 import os
@@ -39,42 +38,60 @@ class MultiSeedIIDAnalysis:
         self.methods = methods
         self.results_data = {}
         self.statistical_results = {}
+        os.makedirs(self.base_args.save_dir, exist_ok=True)
         
-    def run_single_seed_experiment(self, seed):
-        """Run the IID experiment for a single seed."""
-        print(f"\n🚀 Starting IID experiment for seed {seed}...")
+    def generate_slurm_script(self):
+        """Generate a SLURM array job script to run all seed experiments."""
+        script_path = os.path.join(self.base_args.save_dir, "run_iid_multiseed.slurm")
         
-        # Create command for single seed
-        cmd = [
-            "python", "scripts/sample_efficiency_comparison.py",
-            "--epochs", str(self.base_args.epochs),
-            "--seed", str(seed),
-            "--meta_batch_size", str(self.base_args.meta_batch_size),
-            "--vanilla_batch_size", str(self.base_args.vanilla_batch_size),
-            "--inner_lr", str(self.base_args.inner_lr),
-            "--outer_lr", str(self.base_args.outer_lr),
-            "--vanilla_lr", str(self.base_args.vanilla_lr),
-            "--adaptation_steps", str(self.base_args.adaptation_steps),
-            "--val_frequency", str(self.base_args.val_frequency),
-            "--save_dir", self.base_args.save_dir,
-            "--methods"
-        ] + self.methods + [
-            "--data_dir", self.base_args.data_dir
-        ]
+        # Determine the correct experiment script to run
+        experiment_script = "scripts/sample_efficiency_comparison_long_with_checkpointing.py"
+
+        slurm_script_content = f"""#!/bin/bash
+#SBATCH --job-name=iid_sample_efficiency
+#SBATCH --output={self.base_args.save_dir}/slurm_out/slurm_%A_%a.out
+#SBATCH --error={self.base_args.save_dir}/slurm_out/slurm_%A_%a.err
+#SBATCH --time=12:00:00
+#SBATCH --mem=32G
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=4
+#SBATCH --array=0-{len(self.seeds)-1}
+
+# Activate Conda environment
+source activate tensorflow
+
+# Get seed for this job
+SEEDS=({" ".join(map(str, self.seeds))})
+SEED=${{SEEDS[$SLURM_ARRAY_TASK_ID]}}
+
+echo "Running IID Sample Efficiency for seed $SEED"
+
+python {experiment_script} \\
+    --epochs {self.base_args.epochs} \\
+    --seed $SEED \\
+    --meta_batch_size {self.base_args.meta_batch_size} \\
+    --vanilla_batch_size {self.base_args.vanilla_batch_size} \\
+    --inner_lr {self.base_args.inner_lr} \\
+    --outer_lr {self.base_args.outer_lr} \\
+    --vanilla_lr {self.base_args.vanilla_lr} \\
+    --adaptation_steps {self.base_args.adaptation_steps} \\
+    --val_frequency {self.base_args.val_frequency} \\
+    --save_dir {self.base_args.save_dir} \\
+    --methods {" ".join(self.methods)} \\
+    --data_dir {self.base_args.data_dir}
+
+echo "Job for seed $SEED finished."
+"""
+        os.makedirs(os.path.join(self.base_args.save_dir, "slurm_out"), exist_ok=True)
+        with open(script_path, 'w') as f:
+            f.write(slurm_script_content)
+            
+        print("\n✅ Generated SLURM script for experiment execution.")
+        print(f"   Script saved to: {script_path}")
+        print("\n👉 To run the experiments, submit the job to SLURM with:")
+        print(f"   sbatch {script_path}")
+        print("\nAfter the jobs complete, run this script again with the --analyze flag.")
         
-        print(f"Command: {' '.join(cmd)}")
-        
-        # Run the experiment
-        try:
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-            print(f"✅ Seed {seed} completed successfully!")
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Seed {seed} failed with error:")
-            print(f"STDOUT: {e.stdout}")
-            print(f"STDERR: {e.stderr}")
-            return False
-    
     def load_results(self):
         """Load results from all seeds."""
         print("\n📊 Loading results from all seeds...")
@@ -478,18 +495,14 @@ class MultiSeedIIDAnalysis:
         print(f"✅ Statistical report saved to {save_dir}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Multi-Seed IID Sample Efficiency Analysis')
+    """Main function to run the multi-seed analysis."""
+    parser = argparse.ArgumentParser(
+        description="Run and analyze multi-seed IID sample efficiency experiments with checkpointing and SLURM.",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
     
-    # Experiment parameters
-    parser.add_argument('--seeds', nargs='+', type=int, default=[42, 43, 44, 45, 46],
-                       help='Seeds to run (default: 42 43 44 45 46)')
-    parser.add_argument('--methods', nargs='+', default=['fomaml', 'second_order', 'vanilla'],
-                       choices=['fomaml', 'second_order', 'vanilla'],
-                       help='Methods to compare')
-    
-    # Training parameters (passed to individual runs)
-    parser.add_argument('--epochs', type=int, default=15,
-                       help='Number of training epochs')
+    # --- Experiment Arguments ---
+    parser.add_argument('--epochs', type=int, default=1000, help="Total training epochs.")
     parser.add_argument('--meta_batch_size', type=int, default=16,
                        help='Meta batch size')
     parser.add_argument('--vanilla_batch_size', type=int, default=64,
@@ -508,84 +521,52 @@ def main():
     # Data and output
     parser.add_argument('--data_dir', type=str, default='data/meta_h5/pb',
                        help='Data directory')
-    parser.add_argument('--save_dir', type=str, default='results/sample_efficiency_iid_multiseed',
-                       help='Base save directory')
+    parser.add_argument('--save_dir', type=str, 
+                        default="results/sample_efficiency_iid_multiseed", 
+                        help="Directory to save results and checkpoints.")
     
-    # Control options
-    parser.add_argument('--run_experiments', action='store_true',
-                       help='Run the experiments (if False, only analyze existing results)')
-    parser.add_argument('--skip_existing', action='store_true',
-                       help='Skip seeds that already have results')
-    
-    args = parser.parse_args()
-    
-    # Create analysis object
-    analyzer = MultiSeedIIDAnalysis(args, args.seeds, args.methods)
-    
-    # Create output directory
-    output_dir = os.path.join(args.save_dir, 'multiseed_analysis')
-    os.makedirs(output_dir, exist_ok=True)
-    
-    print(f"🎯 MULTI-SEED IID SAMPLE EFFICIENCY ANALYSIS")
-    print(f"={'='*60}")
-    print(f"Seeds: {args.seeds}")
-    print(f"Methods: {args.methods}")
-    print(f"Output directory: {output_dir}")
-    print(f"{'='*60}\n")
-    
-    # Step 1: Run experiments (if requested)
-    if args.run_experiments:
-        print("🚀 PHASE 1: Running IID experiments...")
-        
-        for seed in args.seeds:
-            # Check if results already exist
-            if args.skip_existing:
-                seed_dir = os.path.join(args.save_dir, f'seed_{seed}')
-                if os.path.exists(seed_dir):
-                    print(f"⏭️  Skipping seed {seed} (results already exist)")
-                    continue
-            
-            success = analyzer.run_single_seed_experiment(seed)
-            if not success:
-                print(f"❌ Failed to run seed {seed}")
-                continue
-                
-            # Small delay between runs
-            time.sleep(2)
-    
-    # Step 2: Load and analyze results
-    print("\n📊 PHASE 2: Loading and analyzing results...")
-    
-    if not analyzer.load_results():
-        print("❌ No results found! Make sure experiments have been run.")
-        return
-    
-    # Step 3: Statistical analysis
-    print("\n📈 PHASE 3: Statistical analysis...")
-    
-    analyzer.interpolate_curves()
-    analyzer.perform_statistical_analysis()
-    
-    # Step 4: Create visualizations
-    print("\n🎨 PHASE 4: Creating visualizations...")
-    
-    analyzer.create_publication_plots(output_dir)
-    
-    # Step 5: Save reports
-    print("\n📝 PHASE 5: Saving reports...")
-    
-    analyzer.save_statistical_report(output_dir)
-    
-    # Final summary
-    print(f"\n🎉 MULTI-SEED IID ANALYSIS COMPLETED!")
-    print(f"{'='*60}")
-    print(f"Results saved to: {output_dir}")
-    print(f"Key files:")
-    print(f"  • iid_multiseed_comparison.png - Main comparison plot")
-    print(f"  • iid_statistical_summary.png - Statistical summary")
-    print(f"  • statistical_analysis_report.json - Detailed statistical results")
-    print(f"  • statistical_summary.txt - Human-readable summary")
-    print(f"{'='*60}")
+    # Control Flow Arguments
+    parser.add_argument('--analyze', action='store_true', 
+                        help="Run analysis on existing results. Skips experiment execution.")
 
-if __name__ == '__main__':
+    args = parser.parse_args()
+
+    # --- Script Header ---
+    print("🎯 MULTI-SEED IID SAMPLE EFFICIENCY ANALYSIS (with Checkpointing & SLURM)")
+    print("="*80)
+    
+    seeds = [42, 43, 44, 45, 46]
+    methods = ['fomaml', 'second_order', 'vanilla']
+    
+    print(f"Seeds: {seeds}")
+    print(f"Methods: {methods}")
+    print(f"Output directory: {args.save_dir}")
+    print("="*80)
+
+    analyzer = MultiSeedIIDAnalysis(args, seeds, methods)
+
+    if args.analyze:
+        print("\n📊 PHASE 1: Loading and analyzing results...")
+        if not analyzer.load_results():
+            print("❌ No results found. Please run the experiments first by executing this script without the --analyze flag.")
+            return
+
+        print("\n📈 PHASE 2: Statistical analysis...")
+        analyzer.interpolate_curves()
+        analyzer.perform_statistical_analysis()
+
+        print("\n🎨 PHASE 3: Creating visualizations...")
+        analyzer.create_publication_plots(args.save_dir)
+
+        print("\n📝 PHASE 4: Saving reports...")
+        analyzer.save_statistical_report(args.save_dir)
+
+    else:
+        print("\n🚀 PHASE 1: Generating SLURM script for experiments...")
+        analyzer.generate_slurm_script()
+
+    print("\n🎉 ANALYSIS SCRIPT COMPLETED!")
+    print("="*80)
+
+if __name__ == "__main__":
     main() 
