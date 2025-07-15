@@ -25,6 +25,7 @@ from tqdm import tqdm
 import copy
 from pathlib import Path
 from torch.utils.data import DataLoader, ConcatDataset
+import time
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -51,6 +52,25 @@ ALL_PB_TASKS = [
 # Support and query sizes for meta-learning
 VARIABLE_SUPPORT_SIZES = [4, 6, 8, 10]
 FIXED_QUERY_SIZE = 2
+
+def collate_vanilla(batch):
+    """Collate function for vanilla training.
+    
+    Converts a list of episode dicts into a single batch of (images, labels).
+    """
+    images = []
+    labels = []
+    for episode in batch:
+        # Combine support and query sets for vanilla training
+        images.append(episode['support_images'])
+        images.append(episode['query_images'])
+        labels.append(episode['support_labels'])
+        labels.append(episode['query_labels'])
+    
+    images = torch.cat(images, dim=0)
+    labels = torch.cat(labels, dim=0)
+    
+    return images, labels
 
 def identity_collate(batch):
     """A simple collate_fn that returns the list of items unchanged.
@@ -603,33 +623,60 @@ def train_second_order_maml(args, device, save_dir):
     return results
 
 def train_vanilla_sgd(args, device, save_dir):
-    """Train Vanilla SGD."""
-    print("Training Vanilla SGD...")
-    print(f"Parameters: vanilla_lr={args.vanilla_lr}, batch_size={args.vanilla_batch_size}")
+    """
+    Trains a standard CNN using vanilla SGD on a SINGLE PB task.
+    This provides a true baseline for generalization.
+    """
+    print("\n" + "="*60)
+    print("Training Vanilla SGD on a Single Task ('regular')")
+    print("="*60 + "\n")
+
+    start_time = time.time()
     
-    # Create model
+    # ------------------------------------------------------------------
+    # Model and Optimizer
+    # ------------------------------------------------------------------
     model = SameDifferentCNN().to(device)
-    
-    # Validation: Check parameter count
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Model parameters: {total_params:,} total, {trainable_params:,} trainable")
-    
-    if trainable_params == 0:
-        raise ValueError("No trainable parameters found!")
-    
-    # Create datasets - flatten episodic data into individual samples for vanilla SGD
-    train_dataset = VanillaPBDataset(tasks=ALL_PB_TASKS, split='train', data_dir=args.data_dir)
-    val_dataset = VanillaPBDataset(tasks=ALL_PB_TASKS, split='val', data_dir=args.data_dir)
-    
-    train_loader = DataLoader(train_dataset, batch_size=args.vanilla_batch_size, 
-                             shuffle=True, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.vanilla_batch_size, 
-                           shuffle=False, num_workers=4, pin_memory=True)
-    
-    # Optimizer and loss
     optimizer = optim.Adam(model.parameters(), lr=args.vanilla_lr)
     loss_fn = nn.BCEWithLogitsLoss()
+
+    # ------------------------------------------------------------------
+    # Data Loading - The CORRECTED approach
+    # ------------------------------------------------------------------
+    # Train on a single task to create a true vanilla baseline
+    train_tasks = ['regular'] 
+    # Validate on all tasks to measure generalization
+    val_tasks = ALL_PB_TASKS
+
+    # Use the robust SameDifferentDataset, not the buggy one
+    train_dataset = SameDifferentDataset(
+        data_dir=args.data_dir,
+        tasks=train_tasks,
+        split='train',
+        support_sizes=VARIABLE_SUPPORT_SIZES
+    )
+    val_dataset = SameDifferentDataset(
+        data_dir=args.data_dir,
+        tasks=val_tasks,
+        split='val',
+        support_sizes=VARIABLE_SUPPORT_SIZES
+    )
+    
+    # Use standard DataLoader with the vanilla collate function
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=args.vanilla_batch_size,
+        shuffle=True, 
+        collate_fn=collate_vanilla, 
+        num_workers=4
+    )
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=args.vanilla_batch_size,
+        shuffle=False, 
+        collate_fn=collate_vanilla,
+        num_workers=4
+    )
     
     # Training tracking
     data_points_seen = []

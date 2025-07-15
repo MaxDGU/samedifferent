@@ -18,7 +18,26 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from meta_baseline.models.conv2lr import SameDifferentCNN as Conv2CNN
 from meta_baseline.models.conv4lr import SameDifferentCNN as Conv4CNN
 from meta_baseline.models.conv6lr import SameDifferentCNN as Conv6CNN
-from models.utils import SameDifferentDataset, train_epoch, validate_epoch, EarlyStopping
+from meta_baseline.models.utils_meta import SameDifferentDataset, train_epoch, validate_epoch, EarlyStopping
+
+def collate_vanilla(batch):
+    """Collate function for vanilla training.
+    
+    Converts a list of episode dicts into a single batch of (images, labels).
+    """
+    images = []
+    labels = []
+    for episode in batch:
+        # Combine support and query sets for vanilla training
+        images.append(episode['support_images'])
+        images.append(episode['query_images'])
+        labels.append(episode['support_labels'])
+        labels.append(episode['query_labels'])
+    
+    images = torch.cat(images, dim=0)
+    labels = torch.cat(labels, dim=0)
+    
+    return images, labels
 
 def set_seed(seed):
     """Set random seed for reproducibility."""
@@ -39,9 +58,9 @@ def main():
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--patience', type=int, default=3)
-    parser.add_argument('--val_freq', type=int, default=10)
-    parser.add_argument('--improvement_threshold', type=float, default=0.02)
+    parser.add_argument('--patience', type=int, default=10)
+    parser.add_argument('--val_freq', type=int, default=1)
+    parser.add_argument('--improvement_threshold', type=float, default=0.01)
     parser.add_argument('--data_dir', type=str, default='data/meta_h5/pb')
     parser.add_argument('--output_dir', type=str, default='results/pb_baselines')
     parser.add_argument('--dropout_rate_fc', type=float, default=0.5, help='Dropout rate for fully connected layers')
@@ -65,12 +84,12 @@ def main():
     # Training on all tasks
     train_dataset = SameDifferentDataset(args.data_dir, PB_TASKS, split='train')
     # Validation and testing on specified task only
-    val_dataset = SameDifferentDataset(args.data_dir, args.test_task, split='val')
-    test_dataset = SameDifferentDataset(args.data_dir, args.test_task, split='test')
+    val_dataset = SameDifferentDataset(args.data_dir, [args.test_task], split='val')
+    test_dataset = SameDifferentDataset(args.data_dir, [args.test_task], split='test')
     
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, collate_fn=collate_vanilla)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=collate_vanilla)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=collate_vanilla)
     
     # Initialize model
     if args.architecture == 'conv2':
@@ -155,9 +174,11 @@ def main():
     for task in PB_TASKS:
         print(f"\nTesting on task: {task}")
         # Each task needs its own dataset and dataloader for testing
-        test_dataset = SameDifferentDataset(args.data_dir, task, split='test')
-        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+        test_dataset = SameDifferentDataset(args.data_dir, [task], split='test')
+        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, collate_fn=collate_vanilla)
         
+        # We need to get the train_epoch and validate_epoch functions from the utils_meta file
+        # as the previous utils.py file was deleted. We will use validate_epoch for testing.
         test_loss, test_acc = validate_epoch(model, test_loader, criterion, device)
         test_results[task] = {'test_loss': test_loss, 'test_acc': test_acc}
         print(f'Test Loss for {task}: {test_loss:.4f} | Test Acc for {task}: {test_acc:.2f}%')
