@@ -44,8 +44,8 @@ class MultiSeedIIDAnalysis:
         """Generate a SLURM array job script to run all seed experiments."""
         script_path = os.path.join(self.base_args.save_dir, "run_iid_multiseed.slurm")
         
-        # Determine the correct experiment script to run
-        experiment_script = "scripts/sample_efficiency_comparison_long_with_checkpointing.py"
+        # Use the main comparison script that supports all three methods
+        experiment_script = "scripts/sample_efficiency_comparison.py"
 
         slurm_script_content = f"""#!/bin/bash
 #SBATCH --job-name=iid_sample_efficiency
@@ -57,8 +57,12 @@ class MultiSeedIIDAnalysis:
 #SBATCH --cpus-per-task=4
 #SBATCH --array=0-{len(self.seeds)-1}
 
+# Load required modules
+module load anaconda3
+module load cuda/11.7.0
+
 # Activate Conda environment
-source activate tensorflow
+conda activate tensorflow
 
 # Get seed for this job
 SEEDS=({" ".join(map(str, self.seeds))})
@@ -503,29 +507,19 @@ def main():
     
     # --- Experiment Arguments ---
     parser.add_argument('--epochs', type=int, default=1000, help="Total training epochs.")
-    parser.add_argument('--meta_batch_size', type=int, default=16,
-                       help='Meta batch size')
-    parser.add_argument('--vanilla_batch_size', type=int, default=64,
-                       help='Vanilla SGD batch size')
-    parser.add_argument('--inner_lr', type=float, default=0.05,
-                       help='Inner loop learning rate')
-    parser.add_argument('--outer_lr', type=float, default=0.001,
-                       help='Outer loop learning rate')
-    parser.add_argument('--vanilla_lr', type=float, default=0.0001,
-                       help='Vanilla SGD learning rate')
-    parser.add_argument('--adaptation_steps', type=int, default=3,
-                       help='Number of adaptation steps')
-    parser.add_argument('--val_frequency', type=int, default=3000,
-                       help='Validation frequency (batches)')
-    
-    # Data and output
-    parser.add_argument('--data_dir', type=str, default='data/meta_h5/pb',
-                       help='Data directory')
+    parser.add_argument('--meta_batch_size', type=int, default=16, help='Meta batch size')
+    parser.add_argument('--vanilla_batch_size', type=int, default=64, help='Vanilla SGD batch size')
+    parser.add_argument('--inner_lr', type=float, default=0.05, help='Inner loop learning rate')
+    parser.add_argument('--outer_lr', type=float, default=0.001, help='Outer loop learning rate')
+    parser.add_argument('--vanilla_lr', type=float, default=1e-4, help='Vanilla SGD learning rate')
+    parser.add_argument('--adaptation_steps', type=int, default=5, help='Number of adaptation steps')
+    parser.add_argument('--val_frequency', type=int, default=500, help='Validation frequency (in batches)')
+    parser.add_argument('--data_dir', type=str, default='data/meta_h5/pb', help='Data directory')
     parser.add_argument('--save_dir', type=str, 
                         default="results/sample_efficiency_iid_multiseed", 
                         help="Directory to save results and checkpoints.")
-    
-    # Control Flow Arguments
+
+    # --- Control Flow Arguments ---
     parser.add_argument('--analyze', action='store_true', 
                         help="Run analysis on existing results. Skips experiment execution.")
 
