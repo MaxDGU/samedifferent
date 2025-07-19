@@ -51,7 +51,7 @@ class MultiSeedIIDAnalysis:
 #SBATCH --job-name=iid_sample_efficiency
 #SBATCH --output={self.base_args.save_dir}/slurm_out/slurm_%A_%a.out
 #SBATCH --error={self.base_args.save_dir}/slurm_out/slurm_%A_%a.err
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
@@ -95,7 +95,7 @@ echo "Job for seed $SEED finished."
         print("\n👉 To run the experiments, submit the job to SLURM with:")
         print(f"   sbatch {script_path}")
         print("\nAfter the jobs complete, run this script again with the --analyze flag.")
-        
+    
     def load_results(self):
         """Load results from all seeds."""
         print("\n📊 Loading results from all seeds...")
@@ -506,14 +506,14 @@ def main():
     )
     
     # --- Experiment Arguments ---
-    parser.add_argument('--epochs', type=int, default=1000, help="Total training epochs.")
+    parser.add_argument('--epochs', type=int, default=100, help="Total training epochs.")
     parser.add_argument('--meta_batch_size', type=int, default=16, help='Meta batch size')
     parser.add_argument('--vanilla_batch_size', type=int, default=64, help='Vanilla SGD batch size')
-    parser.add_argument('--inner_lr', type=float, default=0.05, help='Inner loop learning rate')
+    parser.add_argument('--inner_lr', type=float, default=0.01, help='Inner loop learning rate')
     parser.add_argument('--outer_lr', type=float, default=0.001, help='Outer loop learning rate')
     parser.add_argument('--vanilla_lr', type=float, default=1e-4, help='Vanilla SGD learning rate')
     parser.add_argument('--adaptation_steps', type=int, default=5, help='Number of adaptation steps')
-    parser.add_argument('--val_frequency', type=int, default=500, help='Validation frequency (in batches)')
+    parser.add_argument('--val_frequency', type=int, default=200, help='Validation frequency (in batches)')
     parser.add_argument('--data_dir', type=str, default='data/meta_h5/pb', help='Data directory')
     parser.add_argument('--save_dir', type=str, 
                         default="results/sample_efficiency_iid_multiseed", 
@@ -534,6 +534,9 @@ def main():
     
     print(f"Seeds: {seeds}")
     print(f"Methods: {methods}")
+    print(f"Epochs: {args.epochs}")
+    print(f"Inner LR: {args.inner_lr}")
+    print(f"Val Frequency: {args.val_frequency}")
     print(f"Output directory: {args.save_dir}")
     print("="*80)
 
