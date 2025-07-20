@@ -48,7 +48,7 @@ class MultiSeedIIDAnalysis:
         experiment_script = "scripts/sample_efficiency_comparison.py"
 
         # Adjust time limit for speed run
-        time_limit = "6:00:00" if hasattr(self.base_args, 'speed_run') and self.base_args.speed_run else "24:00:00"
+        time_limit = "8:00:00" if hasattr(self.base_args, 'speed_run') and self.base_args.speed_run else "24:00:00"
         job_name = "iid_speedrun" if hasattr(self.base_args, 'speed_run') and self.base_args.speed_run else "iid_sample_efficiency"
 
         slurm_script_content = f"""#!/bin/bash
@@ -717,19 +717,22 @@ def main():
 
     # Speed run optimizations
     if args.speed_run:
-        # Faster parameters for speed run
-        args.epochs = 50  # Fewer epochs
-        args.meta_batch_size = 32  # Larger batches for faster training
-        args.vanilla_batch_size = 128  # Larger vanilla batches
-        args.val_frequency = 100  # More frequent validation
-        args.inner_lr = 0.02  # Slightly higher learning rate for faster convergence
-        args.outer_lr = 0.002  # Higher outer learning rate
-        args.vanilla_lr = 2e-4  # Higher vanilla learning rate
+        # Much more aggressive parameters for speed run
+        args.epochs = 25  # Even fewer epochs for faster completion
+        args.meta_batch_size = 64  # Much larger meta batches
+        args.vanilla_batch_size = 256  # Much larger vanilla batches  
+        args.adaptation_steps = 1  # Reduce adaptation steps to minimum
+        args.val_frequency = 50  # Very frequent validation for early stopping
+        args.inner_lr = 0.05  # Higher learning rate for faster convergence
+        args.outer_lr = 0.005  # Much higher outer learning rate
+        args.vanilla_lr = 5e-4  # Much higher vanilla learning rate
         args.save_dir = "results/sample_efficiency_iid_speedrun"
         
         print("🚀 SPEED RUN MODE ENABLED")
         print("Target: First to reach 70% test accuracy")
-        print("Optimizations: Larger batches, higher LRs, more frequent validation")
+        print("Optimizations: VERY large batches, minimal adaptation steps, aggressive LRs")
+        print(f"Key changes: epochs={args.epochs}, meta_batch={args.meta_batch_size}, vanilla_batch={args.vanilla_batch_size}")
+        print(f"Adaptation steps reduced to {args.adaptation_steps} for maximum speed")
 
     # --- Script Header ---
     print("🎯 MULTI-SEED IID SAMPLE EFFICIENCY ANALYSIS (with Checkpointing & SLURM)")
