@@ -47,11 +47,15 @@ class MultiSeedIIDAnalysis:
         # Use the main comparison script that supports all three methods
         experiment_script = "scripts/sample_efficiency_comparison.py"
 
+        # Adjust time limit for speed run
+        time_limit = "6:00:00" if hasattr(self.base_args, 'speed_run') and self.base_args.speed_run else "24:00:00"
+        job_name = "iid_speedrun" if hasattr(self.base_args, 'speed_run') and self.base_args.speed_run else "iid_sample_efficiency"
+
         slurm_script_content = f"""#!/bin/bash
-#SBATCH --job-name=iid_sample_efficiency
+#SBATCH --job-name={job_name}
 #SBATCH --output={self.base_args.save_dir}/slurm_out/slurm_%A_%a.out
 #SBATCH --error={self.base_args.save_dir}/slurm_out/slurm_%A_%a.err
-#SBATCH --time=24:00:00
+#SBATCH --time={time_limit}
 #SBATCH --mem=32G
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
@@ -92,6 +96,8 @@ echo "Job for seed $SEED finished."
             
         print("\n✅ Generated SLURM script for experiment execution.")
         print(f"   Script saved to: {script_path}")
+        if hasattr(self.base_args, 'speed_run') and self.base_args.speed_run:
+            print(f"   ⚡ Speed run mode: {time_limit} time limit")
         print("\n👉 To run the experiments, submit the job to SLURM with:")
         print(f"   sbatch {script_path}")
         print("\nAfter the jobs complete, run this script again with the --analyze flag.")
@@ -263,6 +269,186 @@ echo "Job for seed $SEED finished."
         
         print(f"✅ Statistical analysis completed for {len(self.methods)} methods")
     
+    def create_speed_run_plots(self, save_dir):
+        """Create speed run specific plots focused on reaching 70% accuracy."""
+        print("\n🎨 Creating speed run plots (race to 70% accuracy)...")
+        
+        # Set up plotting style
+        plt.style.use('seaborn-v0_8')
+        colors = {'fomaml': '#2E8B57', 'second_order': '#B22222', 'vanilla': '#4169E1'}
+        
+        # Create figure with subplots
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+        fig.suptitle('Speed Run Analysis: Race to 70% Accuracy', fontsize=16, fontweight='bold')
+        
+        # Track when each method reaches 70% accuracy
+        time_to_70_percent = {method: [] for method in self.methods}
+        data_to_70_percent = {method: [] for method in self.methods}
+        
+        # Plot 1: Sample efficiency curves with 70% target line
+        for method in self.methods:
+            if method in self.statistical_results['overall_stats']:
+                stats = self.statistical_results['overall_stats'][method]
+                mean_curve = stats['mean_curve']
+                sem_curve = stats['sem_curve']
+                
+                # Convert to percentage
+                mean_curve_pct = mean_curve * 100
+                sem_curve_pct = sem_curve * 100
+                
+                ax1.plot(self.common_x, mean_curve_pct, 
+                        color=colors.get(method, 'gray'), linewidth=2.5, 
+                        label=f'{method.upper()}', alpha=0.9)
+                ax1.fill_between(self.common_x, 
+                               mean_curve_pct - sem_curve_pct,
+                               mean_curve_pct + sem_curve_pct,
+                               color=colors.get(method, 'gray'), alpha=0.2)
+                
+                # Find when this method first reaches 70%
+                reaches_70 = np.where(mean_curve_pct >= 70.0)[0]
+                if len(reaches_70) > 0:
+                    first_70_idx = reaches_70[0]
+                    data_points_to_70 = self.common_x[first_70_idx]
+                    
+                    # Mark the point on the plot
+                    ax1.scatter(data_points_to_70, 70, color=colors.get(method, 'gray'), 
+                              s=100, marker='*', edgecolor='black', linewidth=1, zorder=5)
+                    
+                    # Store for analysis
+                    for seed in self.results_data:
+                        if method in self.interpolated_data[seed]:
+                            seed_curve = self.interpolated_data[seed][method]['accuracies'] * 100
+                            seed_reaches_70 = np.where(seed_curve >= 70.0)[0]
+                            if len(seed_reaches_70) > 0:
+                                data_to_70_percent[method].append(self.common_x[seed_reaches_70[0]])
+        
+        # Add 70% target line
+        ax1.axhline(y=70, color='red', linestyle='--', linewidth=2, alpha=0.7, label='70% Target')
+        ax1.set_xlabel('Data Points Seen')
+        ax1.set_ylabel('Validation Accuracy (%)')
+        ax1.set_title('Speed Run: Sample Efficiency Curves')
+        ax1.legend(loc='lower right')
+        ax1.grid(True, alpha=0.3)
+        ax1.set_ylim(40, 100)
+        
+        # Plot 2: Data points needed to reach 70% (bar plot)
+        methods_with_data = []
+        mean_data_to_70 = []
+        std_data_to_70 = []
+        
+        for method in self.methods:
+            if data_to_70_percent[method]:
+                methods_with_data.append(method.upper())
+                mean_data_to_70.append(np.mean(data_to_70_percent[method]))
+                std_data_to_70.append(np.std(data_to_70_percent[method]))
+        
+        if methods_with_data:
+            bars = ax2.bar(methods_with_data, mean_data_to_70, 
+                          yerr=std_data_to_70, capsize=5,
+                          color=[colors.get(m.lower(), 'gray') for m in methods_with_data],
+                          alpha=0.8, edgecolor='black', linewidth=1)
+            
+            # Add value labels on bars
+            for i, (bar, mean_val, std_val) in enumerate(zip(bars, mean_data_to_70, std_data_to_70)):
+                height = bar.get_height()
+                ax2.text(bar.get_x() + bar.get_width()/2., height + std_val + max(mean_data_to_70)*0.02,
+                        f'{mean_val:.0f}±{std_val:.0f}',
+                        ha='center', va='bottom', fontweight='bold')
+        
+        ax2.set_ylabel('Data Points to Reach 70%')
+        ax2.set_title('Efficiency: Data Points Needed for 70% Accuracy')
+        ax2.grid(True, alpha=0.3, axis='y')
+        
+        # Plot 3: Success rate (percentage of seeds that reached 70%)
+        success_rates = []
+        method_names = []
+        
+        for method in self.methods:
+            total_seeds = len(self.results_data)
+            successful_seeds = len(data_to_70_percent[method])
+            success_rate = (successful_seeds / total_seeds) * 100 if total_seeds > 0 else 0
+            
+            if method in self.statistical_results['overall_stats']:  # Only include methods with data
+                method_names.append(method.upper())
+                success_rates.append(success_rate)
+        
+        if method_names:
+            bars = ax3.bar(method_names, success_rates,
+                          color=[colors.get(m.lower(), 'gray') for m in method_names],
+                          alpha=0.8, edgecolor='black', linewidth=1)
+            
+            # Add percentage labels on bars
+            for bar, rate in zip(bars, success_rates):
+                height = bar.get_height()
+                ax3.text(bar.get_x() + bar.get_width()/2., height + 2,
+                        f'{rate:.1f}%',
+                        ha='center', va='bottom', fontweight='bold')
+        
+        ax3.set_ylabel('Success Rate (%)')
+        ax3.set_title('Success Rate: % of Seeds Reaching 70% Accuracy')
+        ax3.set_ylim(0, 105)
+        ax3.grid(True, alpha=0.3, axis='y')
+        
+        # Plot 4: Final accuracy comparison
+        final_accuracies = []
+        final_method_names = []
+        final_stds = []
+        
+        for method in self.methods:
+            if method in self.statistical_results['overall_stats']:
+                final_perf = self.statistical_results['overall_stats'][method]['final_performance']
+                final_method_names.append(method.upper())
+                final_accuracies.append(final_perf['mean'] * 100)
+                final_stds.append(final_perf['std'] * 100)
+        
+        if final_method_names:
+            bars = ax4.bar(final_method_names, final_accuracies, 
+                          yerr=final_stds, capsize=5,
+                          color=[colors.get(m.lower(), 'gray') for m in final_method_names],
+                          alpha=0.8, edgecolor='black', linewidth=1)
+            
+            # Add value labels on bars
+            for bar, acc, std in zip(bars, final_accuracies, final_stds):
+                height = bar.get_height()
+                ax4.text(bar.get_x() + bar.get_width()/2., height + std + 1,
+                        f'{acc:.1f}±{std:.1f}%',
+                        ha='center', va='bottom', fontweight='bold')
+        
+        ax4.axhline(y=70, color='red', linestyle='--', linewidth=2, alpha=0.7, label='70% Target')
+        ax4.set_ylabel('Final Accuracy (%)')
+        ax4.set_title('Final Performance Comparison')
+        ax4.legend()
+        ax4.grid(True, alpha=0.3, axis='y')
+        ax4.set_ylim(50, 100)
+        
+        plt.tight_layout()
+        
+        # Save plots
+        speed_run_plot_path = os.path.join(save_dir, 'speed_run_analysis.png')
+        plt.savefig(speed_run_plot_path, dpi=300, bbox_inches='tight')
+        plt.savefig(speed_run_plot_path.replace('.png', '.pdf'), bbox_inches='tight')
+        plt.close()
+        
+        # Create summary report
+        print("\n📊 SPEED RUN RESULTS SUMMARY:")
+        print("="*50)
+        
+        if methods_with_data and data_to_70_percent:
+            # Find the winner (method that reaches 70% with least data)
+            winner_idx = np.argmin(mean_data_to_70)
+            winner = methods_with_data[winner_idx]
+            winner_data = mean_data_to_70[winner_idx]
+            
+            print(f"🏆 WINNER: {winner}")
+            print(f"   Data points to 70%: {winner_data:.0f} ± {std_data_to_70[winner_idx]:.0f}")
+            
+            print(f"\n📈 All Results (Data Points to 70% Accuracy):")
+            for method, mean_val, std_val in zip(methods_with_data, mean_data_to_70, std_data_to_70):
+                emoji = "🥇" if method == winner else "📊"
+                print(f"   {emoji} {method}: {mean_val:.0f} ± {std_val:.0f}")
+        
+        print(f"\n✅ Speed run plots saved to: {save_dir}")
+        
     def create_publication_plots(self, save_dir):
         """Create publication-quality plots with statistical analysis."""
         print("\n🎨 Creating publication-quality plots...")
@@ -519,14 +705,36 @@ def main():
                         default="results/sample_efficiency_iid_multiseed", 
                         help="Directory to save results and checkpoints.")
 
+    # --- Speed Run Mode ---
+    parser.add_argument('--speed_run', action='store_true', 
+                        help="Enable speed run mode: faster training to reach 70% accuracy quickly")
+    
     # --- Control Flow Arguments ---
     parser.add_argument('--analyze', action='store_true', 
                         help="Run analysis on existing results. Skips experiment execution.")
 
     args = parser.parse_args()
 
+    # Speed run optimizations
+    if args.speed_run:
+        # Faster parameters for speed run
+        args.epochs = 50  # Fewer epochs
+        args.meta_batch_size = 32  # Larger batches for faster training
+        args.vanilla_batch_size = 128  # Larger vanilla batches
+        args.val_frequency = 100  # More frequent validation
+        args.inner_lr = 0.02  # Slightly higher learning rate for faster convergence
+        args.outer_lr = 0.002  # Higher outer learning rate
+        args.vanilla_lr = 2e-4  # Higher vanilla learning rate
+        args.save_dir = "results/sample_efficiency_iid_speedrun"
+        
+        print("🚀 SPEED RUN MODE ENABLED")
+        print("Target: First to reach 70% test accuracy")
+        print("Optimizations: Larger batches, higher LRs, more frequent validation")
+
     # --- Script Header ---
     print("🎯 MULTI-SEED IID SAMPLE EFFICIENCY ANALYSIS (with Checkpointing & SLURM)")
+    if args.speed_run:
+        print("⚡ SPEED RUN MODE: Race to 70% Accuracy")
     print("="*80)
     
     seeds = [42, 43, 44, 45, 46]
@@ -537,6 +745,9 @@ def main():
     print(f"Epochs: {args.epochs}")
     print(f"Inner LR: {args.inner_lr}")
     print(f"Val Frequency: {args.val_frequency}")
+    if args.speed_run:
+        print(f"Meta Batch Size: {args.meta_batch_size}")
+        print(f"Vanilla Batch Size: {args.vanilla_batch_size}")
     print(f"Output directory: {args.save_dir}")
     print("="*80)
 
@@ -553,7 +764,10 @@ def main():
         analyzer.perform_statistical_analysis()
 
         print("\n🎨 PHASE 3: Creating visualizations...")
-        analyzer.create_publication_plots(args.save_dir)
+        if args.speed_run:
+            analyzer.create_speed_run_plots(args.save_dir)
+        else:
+            analyzer.create_publication_plots(args.save_dir)
 
         print("\n📝 PHASE 4: Saving reports...")
         analyzer.save_statistical_report(args.save_dir)
