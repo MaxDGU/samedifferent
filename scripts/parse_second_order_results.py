@@ -27,11 +27,11 @@ def parse_second_order_from_file(filepath):
         
         # Find all validation blocks for Second-Order MAML
         # Look for patterns like:
-        # --- Validation at Batch 800 ---
-        #   Data points seen: 4,795,442
-        #   Current train accuracy: 88.23%
-        #   Validation accuracy: 70.15%
-        validation_pattern = r'--- Validation at Batch (\d+) ---\s+Data points seen: ([\d,]+)\s+Current train accuracy: [\d.]+%\s+Validation accuracy: ([\d.]+)%'
+        # --- Second-Order MAML Validation at Batch 1400 ---
+        #   Data points seen: 5,241,860
+        #   Current train accuracy: 91.11%
+        #   Validation accuracy: 65.01%
+        validation_pattern = r'--- Second-Order MAML Validation at Batch (\d+) ---\s+Data points seen: ([\d,]+)\s+Current train accuracy: [\d.]+%\s+Validation accuracy: ([\d.]+)%'
         
         matches = re.findall(validation_pattern, content)
         
