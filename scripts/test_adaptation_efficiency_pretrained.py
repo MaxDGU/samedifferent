@@ -225,15 +225,15 @@ def run_pretrained_adaptation_comparison(args):
     test_episodes = []
     for batch in test_loader:
         # Convert collated batch back to individual episodes
-        batch_size = len(batch['task'])
+        batch_size = batch['support_images'].size(0)  # Get batch size from tensor dimension
         for i in range(batch_size):
             episode = {
                 'support_images': batch['support_images'][i],
-                'support_labels': batch['support_labels'][i],
+                'support_labels': batch['support_labels'][i], 
                 'query_images': batch['query_images'][i],
                 'query_labels': batch['query_labels'][i],
-                'task': batch['task'][i],
-                'support_size': batch['support_size'][i]
+                'task': batch['task'],  # Single value for the whole batch
+                'support_size': batch['support_size']  # Single value for the whole batch
             }
             test_episodes.append(episode)
     
