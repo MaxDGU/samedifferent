@@ -2,7 +2,7 @@
 #SBATCH --job-name=comp_efficiency
 #SBATCH --output=results/computational_efficiency/slurm_output_%j.out
 #SBATCH --error=results/computational_efficiency/slurm_error_%j.err
-#SBATCH --time=4:00:00
+#SBATCH --time=6:00:00
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
@@ -43,14 +43,14 @@ python scripts/computational_efficiency_comparison.py \
     --data_dir /scratch/gpfs/mg7411/samedifferent/data/meta_h5/pb \
     --save_dir results/computational_efficiency \
     --meta_batch_size 8 \
-    --inner_lr 0.1 \
-    --outer_lr 0.005 \
-    --max_training_batches 200 \
-    --warmup_batches 500 \
-    --training_adaptation_steps 10 \
-    --max_test_episodes 100 \
-    --max_adaptation_steps 15 \
-    --target_accuracies 60.0 65.0 70.0 \
+    --inner_lr 0.001 \
+    --outer_lr 0.0001 \
+    --max_training_batches 300 \
+    --warmup_batches 800 \
+    --training_adaptation_steps 5 \
+    --max_test_episodes 150 \
+    --max_adaptation_steps 20 \
+    --target_accuracies 55.0 60.0 65.0 70.0 \
     --device cuda
 
 echo ""

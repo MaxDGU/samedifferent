@@ -21,16 +21,30 @@ This experiment tests the hypothesis that **First-Order MAML** is more training-
 
 ## 🚀 How to Run on Della
 
-### Step 1: Trial Run (Recommended)
-First, test the script with minimal parameters:
+### Step 1: Trial Run (On Della Only)
+Test the script with minimal parameters **on Della** (local environment may have incomplete dependencies):
 
 ```bash
 # SSH to Della and navigate to project
 cd /scratch/gpfs/mg7411/samedifferent
 
-# Run trial (quick test)
+# Activate the environment
+conda activate tensorflow
+
+# Run conservative trial (recommended - includes optimization fixes)
+python scripts/computational_efficiency_trial_conservative.py
+
+# Or run original trial
 python scripts/computational_efficiency_trial.py
 ```
+
+**Conservative Trial Features**:
+- Conservative learning rates (inner_lr=0.001, outer_lr=0.0001)  
+- Gradient clipping for stability
+- Weight decay and learning rate scheduler
+- Optimized for Second-Order MAML convergence
+
+**Note**: The trial requires the full learn2learn installation which may not be available locally.
 
 ### Step 2: Full Experiment
 If trial run succeeds, run the full experiment:
@@ -61,11 +75,17 @@ The experiment creates:
 
 **Minimal Dataset** (for speed):
 - Tasks: `['regular', 'lines', 'open']` (3 tasks only)
-- Training batches measured: 30
-- Test episodes: 100
-- Max adaptation steps: 15
+- Training batches measured: 300 (with 800 warmup)
+- Test episodes: 150
+- Max adaptation steps: 20
 
-**Expected Runtime**: ~1-2 hours on GPU
+**Conservative Learning Rates** (for stability):
+- Inner LR: 0.001 (was 0.1)
+- Outer LR: 0.0001 (was 0.005)
+- Gradient clipping: max_norm=1.0
+- Weight decay: 1e-5
+
+**Expected Runtime**: ~4-6 hours on GPU (increased for better learning)
 
 ## 📈 Expected Results
 

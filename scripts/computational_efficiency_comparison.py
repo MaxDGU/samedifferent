@@ -93,7 +93,7 @@ def fast_adapt(episode, learner, loss_fn, adaptation_steps, device):
 
     return query_loss, query_acc
 
-def measure_training_efficiency(method_name, maml, train_loader, optimizer, loss_fn, args, device):
+def measure_training_efficiency(method_name, maml, train_loader, optimizer, loss_fn, args, device, scheduler=None):
     """Measure training computational efficiency."""
     print(f"  📊 Measuring training efficiency for {method_name}")
     
@@ -132,7 +132,15 @@ def measure_training_efficiency(method_name, maml, train_loader, optimizer, loss
         batch_loss /= len(batch)
         batch_acc /= len(batch)
         batch_loss.backward()
+        
+        # Gradient clipping for stability
+        torch.nn.utils.clip_grad_norm_(maml.parameters(), max_norm=1.0)
+        
         optimizer.step()
+        
+        # Update scheduler if provided
+        if scheduler is not None:
+            scheduler.step(batch_loss.item())
         
         warmup_losses.append(batch_loss.item())
         warmup_accs.append(batch_acc.item() * 100)
@@ -178,6 +186,10 @@ def measure_training_efficiency(method_name, maml, train_loader, optimizer, loss
         # Backward pass timing
         backward_start = time.perf_counter()
         batch_loss.backward()
+        
+        # Check gradient norm before clipping (for debugging)
+        grad_norm = torch.nn.utils.clip_grad_norm_(maml.parameters(), max_norm=1.0)
+        
         backward_time = time.perf_counter() - backward_start
         
         # Optimization timing
@@ -342,12 +354,13 @@ def run_computational_comparison(args):
             allow_nograd=True
         )
         
-        optimizer = optim.Adam(maml.parameters(), lr=args.outer_lr)
+        optimizer = optim.Adam(maml.parameters(), lr=args.outer_lr, weight_decay=1e-5)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.8, patience=200, verbose=False)
         
         # Phase 1: Training efficiency
         print("Phase 1: Training Efficiency Measurement")
         training_metrics = measure_training_efficiency(
-            method, maml, train_loader, optimizer, loss_fn, args, device
+            method, maml, train_loader, optimizer, loss_fn, args, device, scheduler
         )
         
         # Phase 2: Test-time adaptation efficiency
@@ -543,9 +556,9 @@ def main():
     # Training parameters
     parser.add_argument('--meta_batch_size', type=int, default=8,
                        help='Meta batch size for efficiency measurement')
-    parser.add_argument('--inner_lr', type=float, default=0.05,
+    parser.add_argument('--inner_lr', type=float, default=0.001,
                        help='Inner loop learning rate')
-    parser.add_argument('--outer_lr', type=float, default=0.001,
+    parser.add_argument('--outer_lr', type=float, default=0.0001,
                        help='Outer loop learning rate')
     
     # Efficiency measurement parameters
