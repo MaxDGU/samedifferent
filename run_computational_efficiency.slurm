@@ -2,7 +2,7 @@
 #SBATCH --job-name=comp_efficiency
 #SBATCH --output=results/computational_efficiency/slurm_output_%j.out
 #SBATCH --error=results/computational_efficiency/slurm_error_%j.err
-#SBATCH --time=2:00:00
+#SBATCH --time=4:00:00
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
@@ -45,7 +45,8 @@ python scripts/computational_efficiency_comparison.py \
     --meta_batch_size 8 \
     --inner_lr 0.05 \
     --outer_lr 0.001 \
-    --max_training_batches 30 \
+    --max_training_batches 150 \
+    --warmup_batches 100 \
     --training_adaptation_steps 5 \
     --max_test_episodes 100 \
     --max_adaptation_steps 15 \

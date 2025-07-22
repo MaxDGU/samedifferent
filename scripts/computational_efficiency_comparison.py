@@ -109,6 +109,28 @@ def measure_training_efficiency(method_name, maml, train_loader, optimizer, loss
     maml.train()
     batch_count = 0
     
+    # Warmup training - train for some batches before measuring
+    print(f"    🔥 Warming up with {args.warmup_batches} batches...")
+    warmup_count = 0
+    for batch_idx, batch in enumerate(train_loader):
+        if warmup_count >= args.warmup_batches:
+            break
+            
+        optimizer.zero_grad()
+        batch_loss = 0.0
+        
+        for task_batch in batch:
+            learner = maml.clone()
+            task_loss, task_acc = fast_adapt(task_batch, learner, loss_fn, args.training_adaptation_steps, device)
+            batch_loss += task_loss
+        
+        batch_loss /= len(batch)
+        batch_loss.backward()
+        optimizer.step()
+        warmup_count += 1
+    
+    print(f"    📏 Now measuring efficiency for {args.max_training_batches} batches...")
+    
     for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Training {method_name}")):
         if batch_count >= args.max_training_batches:
             break
@@ -510,6 +532,8 @@ def main():
     # Efficiency measurement parameters
     parser.add_argument('--max_training_batches', type=int, default=20,
                        help='Number of training batches to measure')
+    parser.add_argument('--warmup_batches', type=int, default=50,
+                       help='Number of warmup training batches before measurement')
     parser.add_argument('--training_adaptation_steps', type=int, default=5,
                        help='Adaptation steps during training measurement')
     parser.add_argument('--max_test_episodes', type=int, default=50,
