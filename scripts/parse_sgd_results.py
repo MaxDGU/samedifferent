@@ -175,14 +175,14 @@ def save_extracted_data(all_data_points, all_accuracies, output_dir):
                     break
     
     # Save to JSON
-    json_path = os.path.join(output_dir, 'fomaml_extracted_data.json')
+    json_path = os.path.join(output_dir, 'sgd_extracted_data.json')
     with open(json_path, 'w') as f:
         json.dump(data, f, indent=2)
     
     print(f"✅ Data saved to: {json_path}")
     
     # Print summary
-    print("\n📊 FOMAML SAMPLE EFFICIENCY SUMMARY:")
+    print("\n📊 VANILLA SGD SAMPLE EFFICIENCY SUMMARY:")
     print("="*50)
     
     seeds_reaching_70 = 0
