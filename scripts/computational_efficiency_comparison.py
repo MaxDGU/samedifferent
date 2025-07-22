@@ -112,22 +112,41 @@ def measure_training_efficiency(method_name, maml, train_loader, optimizer, loss
     # Warmup training - train for some batches before measuring
     print(f"    🔥 Warming up with {args.warmup_batches} batches...")
     warmup_count = 0
+    warmup_losses = []
+    warmup_accs = []
+    
     for batch_idx, batch in enumerate(train_loader):
         if warmup_count >= args.warmup_batches:
             break
             
         optimizer.zero_grad()
         batch_loss = 0.0
+        batch_acc = 0.0
         
         for task_batch in batch:
             learner = maml.clone()
             task_loss, task_acc = fast_adapt(task_batch, learner, loss_fn, args.training_adaptation_steps, device)
             batch_loss += task_loss
+            batch_acc += task_acc
         
         batch_loss /= len(batch)
+        batch_acc /= len(batch)
         batch_loss.backward()
         optimizer.step()
+        
+        warmup_losses.append(batch_loss.item())
+        warmup_accs.append(batch_acc.item() * 100)
         warmup_count += 1
+        
+        # Print progress every 100 batches
+        if warmup_count % 100 == 0:
+            recent_loss = np.mean(warmup_losses[-10:])
+            recent_acc = np.mean(warmup_accs[-10:])
+            print(f"    Warmup batch {warmup_count}/{args.warmup_batches}: Loss={recent_loss:.4f}, Acc={recent_acc:.1f}%")
+    
+    final_warmup_loss = np.mean(warmup_losses[-20:]) if len(warmup_losses) > 20 else np.mean(warmup_losses)
+    final_warmup_acc = np.mean(warmup_accs[-20:]) if len(warmup_accs) > 20 else np.mean(warmup_accs)
+    print(f"    🎯 Warmup complete! Final: Loss={final_warmup_loss:.4f}, Acc={final_warmup_acc:.1f}%")
     
     print(f"    📏 Now measuring efficiency for {args.max_training_batches} batches...")
     

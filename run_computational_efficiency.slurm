@@ -43,11 +43,11 @@ python scripts/computational_efficiency_comparison.py \
     --data_dir /scratch/gpfs/mg7411/samedifferent/data/meta_h5/pb \
     --save_dir results/computational_efficiency \
     --meta_batch_size 8 \
-    --inner_lr 0.05 \
-    --outer_lr 0.001 \
-    --max_training_batches 150 \
-    --warmup_batches 100 \
-    --training_adaptation_steps 5 \
+    --inner_lr 0.1 \
+    --outer_lr 0.005 \
+    --max_training_batches 200 \
+    --warmup_batches 500 \
+    --training_adaptation_steps 10 \
     --max_test_episodes 100 \
     --max_adaptation_steps 15 \
     --target_accuracies 60.0 65.0 70.0 \
