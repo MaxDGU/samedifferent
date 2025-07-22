@@ -33,16 +33,11 @@ if project_root not in sys.path:
 # Import required modules
 import learn2learn as l2l
 from meta_baseline.models.conv6lr import SameDifferentCNN
-from meta_baseline.models.utils_meta import SameDifferentDataset
+from meta_baseline.models.utils_meta import SameDifferentDataset, collate_episodes
 
 # Minimal task set for efficiency testing
 EFFICIENCY_TASKS = ['regular', 'lines', 'open']
 SUPPORT_SIZES = [4, 6]
-QUERY_SIZE = 2
-
-def identity_collate(batch):
-    """Simple collate function that returns the batch unchanged."""
-    return batch
 
 def accuracy(predictions, targets):
     """Calculate accuracy from predictions and targets."""
@@ -216,21 +211,31 @@ def run_pretrained_adaptation_comparison(args):
         args.data_dir, 
         EFFICIENCY_TASKS, 
         'test',
-        support_sizes=SUPPORT_SIZES,
-        query_size=QUERY_SIZE
+        support_sizes=SUPPORT_SIZES
     )
     
     test_loader = DataLoader(
         test_dataset, 
         batch_size=args.batch_size, 
         shuffle=False,
-        collate_fn=identity_collate
+        collate_fn=collate_episodes
     )
     
     # Collect test episodes
     test_episodes = []
     for batch in test_loader:
-        test_episodes.extend(batch)
+        # Convert collated batch back to individual episodes
+        batch_size = len(batch['task'])
+        for i in range(batch_size):
+            episode = {
+                'support_images': batch['support_images'][i],
+                'support_labels': batch['support_labels'][i],
+                'query_images': batch['query_images'][i],
+                'query_labels': batch['query_labels'][i],
+                'task': batch['task'][i],
+                'support_size': batch['support_size'][i]
+            }
+            test_episodes.append(episode)
     
     print(f"Loaded {len(test_episodes)} test episodes")
     
